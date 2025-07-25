@@ -1,0 +1,7 @@
+[package]
+name = "pror"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+expect-test = "1.5.1"
