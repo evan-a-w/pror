@@ -1,5 +1,5 @@
 use std::cmp::max;
-use std::fmt::Write; // for writeln!
+use std::fmt::Write;
 
 struct Node<K, V> {
     key: K,
@@ -227,7 +227,6 @@ mod tests {
 
     use expect_test::{expect, Expect};
 
-    // Helper: collect keys in-order
     fn inorder_keys<K: Ord + Clone, V: Clone>(tree: &AvlTree<K, V>) -> Vec<K> {
         fn traverse<K: Clone, V: Clone>(
             idx: Option<usize>,
@@ -299,7 +298,6 @@ mod tests {
         traverse(tree.root, 0, &tree.pool, String::new())
     }
 
-    // Helper: check AVL balance property
     fn check_balance<K: Clone, V: Clone>(
         idx: Option<usize>,
         pool: &NodePool<K, V>,
@@ -381,7 +379,6 @@ mod tests {
         tree.insert(10, "ten");
         tree.insert(5, "five");
         tree.insert(3, "three");
-        // Node 5 has one child (3)
         tree.remove(&5);
         assert_eq!(tree.get(&5), None);
         assert_eq!(tree.get(&3), Some(&"three"));
@@ -403,15 +400,12 @@ mod tests {
     #[test]
     fn test_balance_after_operations() {
         let mut tree = AvlTree::new();
-        // Insert sorted sequence to force rotations
         for k in 1..=100 {
             tree.insert(k, k);
         }
-        // Remove a few
         for k in &[50, 75, 25] {
             tree.remove(k);
         }
-        // Check balance property
         let (balanced, _) = check_balance(tree.root, &tree.pool);
         assert!(balanced, "Tree is unbalanced after operations");
     }
