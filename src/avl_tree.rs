@@ -1,4 +1,5 @@
 use std::cmp::max;
+use std::fmt::Write; // for writeln!
 
 struct Node<K, V> {
     key: K,
@@ -175,25 +176,37 @@ impl<K: Ord + Clone, V: Clone> AvlTree<K, V> {
                     .cmp(&self.pool.nodes[i].key),
             };
             match cmp {
-                std::cmp::Ordering::Less => self.pool.nodes[i].left = self.delete_node(self.pool.nodes[i].left, key),
+                std::cmp::Ordering::Less => {
+                    self.pool.nodes[i].left = self.delete_node(self.pool.nodes[i].left, key)
+                }
                 std::cmp::Ordering::Greater => {
                     self.pool.nodes[i].right = self.delete_node(self.pool.nodes[i].right, key)
                 }
                 std::cmp::Ordering::Equal => {
-                    let succ = self.min_value_node(self.pool.nodes[i].right.unwrap());
-                    let (li, ri) = if i == succ {
+                    if self.pool.nodes[i].left.is_none() {
+                        let r = self.pool.nodes[i].right;
                         self.pool.free(i);
-                        return None;
-                    } else if i > succ {
-                        (succ, i)
+                        return r;
+                    } else if self.pool.nodes[i].right.is_none() {
+                        let l = self.pool.nodes[i].left;
+                        self.pool.free(i);
+                        return l;
                     } else {
-                        (i, succ)
-                    };
-                    let (l, r) = self.pool.nodes.split_at_mut(ri);
-                    std::mem::swap(&mut l[li].key, &mut r[0].key);
-                    std::mem::swap(&mut l[li].value, &mut r[0].value);
-                    self.pool.nodes[i].right =
-                        self.delete_node(self.pool.nodes[i].right, KeyOrIdx::Index(succ));
+                        let succ = self.min_value_node(self.pool.nodes[i].right.unwrap());
+                        let (li, ri) = if i == succ {
+                            self.pool.free(i);
+                            return None;
+                        } else if i > succ {
+                            (succ, i)
+                        } else {
+                            (i, succ)
+                        };
+                        let (l, r) = self.pool.nodes.split_at_mut(ri);
+                        std::mem::swap(&mut l[li].key, &mut r[0].key);
+                        std::mem::swap(&mut l[li].value, &mut r[0].value);
+                        self.pool.nodes[i].right =
+                            self.delete_node(self.pool.nodes[i].right, KeyOrIdx::Index(succ));
+                    }
                 }
             };
             Some(self.rebalance(i))
@@ -207,11 +220,12 @@ impl<K: Ord + Clone, V: Clone> AvlTree<K, V> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cmp::max;
+
+    use expect_test::{expect, Expect};
 
     // Helper: collect keys in-order
     fn inorder_keys<K: Ord + Clone, V: Clone>(tree: &AvlTree<K, V>) -> Vec<K> {
@@ -231,8 +245,65 @@ mod tests {
         keys
     }
 
+    fn inorder_iter<K: Ord + Clone, V: Clone, F: Fn(usize, &K, &V) -> ()>(
+        tree: &AvlTree<K, V>,
+        f: &F,
+    ) {
+        fn traverse<K: Clone, V: Clone, F: Fn(usize, &K, &V) -> ()>(
+            idx: Option<usize>,
+            level: usize,
+            pool: &NodePool<K, V>,
+            f: &F,
+        ) {
+            if let Some(i) = idx {
+                traverse(pool.nodes[i].left, level + 1, pool, f);
+                f(level, &pool.nodes[i].key, &pool.nodes[i].value);
+                traverse(pool.nodes[i].right, level + 1, pool, f);
+            }
+        }
+        traverse(tree.root, 0, &tree.pool, f);
+    }
+
+    fn pretty_print<K: Ord + Clone + std::fmt::Display, V: Clone + std::fmt::Display>(
+        tree: &AvlTree<K, V>,
+    ) {
+        inorder_iter(tree, &|level, key, value| {
+            println!("{}{}: {}", "  ".repeat(level), key, value);
+        });
+    }
+    fn pretty_print_to_string<K, V>(tree: &AvlTree<K, V>) -> String
+    where
+        K: Ord + Clone + std::fmt::Display,
+        V: Clone + std::fmt::Display,
+    {
+        fn traverse<K: Clone + std::fmt::Display, V: Clone + std::fmt::Display>(
+            idx: Option<usize>,
+            level: usize,
+            pool: &NodePool<K, V>,
+            mut out: String,
+        ) -> String {
+            if let Some(i) = idx {
+                out = traverse(pool.nodes[i].left, level + 1, pool, out);
+                writeln!(
+                    &mut out,
+                    "{}{}: {}",
+                    "  ".repeat(level),
+                    &pool.nodes[i].key,
+                    &pool.nodes[i].value
+                )
+                .expect("writing to String cannot fail");
+                out = traverse(pool.nodes[i].right, level + 1, pool, out);
+            }
+            out
+        }
+        traverse(tree.root, 0, &tree.pool, String::new())
+    }
+
     // Helper: check AVL balance property
-    fn check_balance<K: Clone, V: Clone>(idx: Option<usize>, pool: &NodePool<K, V>) -> (bool, usize) {
+    fn check_balance<K: Clone, V: Clone>(
+        idx: Option<usize>,
+        pool: &NodePool<K, V>,
+    ) -> (bool, usize) {
         if let Some(i) = idx {
             let (lb, lh) = check_balance(pool.nodes[i].left, pool);
             let (rb, rh) = check_balance(pool.nodes[i].right, pool);
@@ -249,6 +320,13 @@ mod tests {
         tree.insert("a", 1);
         tree.insert("b", 2);
         tree.insert("c", 3);
+        let s = pretty_print_to_string(&tree);
+        let expect = expect![[r#"
+              a: 1
+            b: 2
+              c: 3
+        "#]];
+        expect.assert_eq(&s);
         assert_eq!(tree.get(&"a"), Some(&1));
         assert_eq!(tree.get(&"b"), Some(&2));
         assert_eq!(tree.get(&"c"), Some(&3));
@@ -281,7 +359,18 @@ mod tests {
         let mut tree = AvlTree::new();
         tree.insert(1, "one");
         tree.insert(2, "two");
+        let s = pretty_print_to_string(&tree);
+        let expect = expect![[r#"
+            1: one
+              2: two
+        "#]];
+        expect.assert_eq(&s);
         tree.remove(&2);
+        let s = pretty_print_to_string(&tree);
+        let expect = expect![[r#"
+            1: one
+        "#]];
+        expect.assert_eq(&s);
         assert_eq!(tree.get(&2), None);
         assert_eq!(tree.get(&1), Some(&"one"));
     }
