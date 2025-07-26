@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use pror::bitset::*;
+    use pror::fixed_bitset::*;
 
     // Use 1 word per block (64 bits per block)
     type BS1 = BitSet<Vec<[usize; 1]>, 1>;
@@ -80,3 +80,52 @@ mod tests {
         assert!(bs.capacity() > usize::BITS as usize);
     }
 }
+
+#[cfg(test)]
+mod iter_tests {
+    use pror::fixed_bitset::*;
+    use pror::bitset::BitSetT;
+    type BS1 = BitSet<Vec<[usize; 1]>, 1>;
+
+    #[test]
+    fn test_iter_union() {
+        let mut a = BS1::new(1);
+        let mut b = BS1::new(1);
+        a.set(1);
+        a.set(3);
+        a.set(5);
+        b.set(2);
+        b.set(3);
+        b.set(6);
+        let u: Vec<_> = a.iter_union(&b).collect();
+        assert_eq!(u, vec![1, 2, 3, 5, 6]);
+    }
+
+    #[test]
+    fn test_iter_intersection() {
+        let mut a = BS1::new(1);
+        let mut b = BS1::new(1);
+        a.set(2);
+        a.set(4);
+        b.set(4);
+        b.set(6);
+        let i: Vec<_> = a.iter_intersection(&b).collect();
+        assert_eq!(i, vec![4]);
+    }
+
+    #[test]
+    fn test_iter_difference() {
+        let mut a = BS1::new(1);
+        let mut b = BS1::new(1);
+        a.set(1);
+        a.set(3);
+        a.set(5);
+        b.set(3);
+        b.set(6);
+        let d: Vec<_> = a.iter_difference(&b).collect();
+        assert_eq!(d, vec![1, 5]);
+        let d2: Vec<_> = b.iter_difference(&a).collect();
+        assert_eq!(d2, vec![6]);
+    }
+}
+
