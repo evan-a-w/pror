@@ -27,28 +27,45 @@ pub trait BlockStorage<const N: usize>: Sized {
     }
 }
 
-impl<const N: usize> BlockStorage<N> for Vec<[usize; N]> {
+/// Generic `BlockStorage` for any container of `[usize; N]` that can be default-constructed,
+/// extended, and viewed as a slice of blocks.
+impl<S, const N: usize> BlockStorage<N> for S
+where
+    S: Default + Extend<[usize; N]> + AsRef<[[usize; N]]> + AsMut<[[usize; N]]>,
+{
     fn with_capacity(blocks: usize) -> Self {
-        vec![[0; N]; blocks]
+        let mut s = S::default();
+        s.extend(std::iter::repeat([0; N]).take(blocks));
+        s
     }
+
     fn block_count(&self) -> usize {
-        self.len()
+        self.as_ref().len()
     }
+
     fn block(&self, i: usize) -> &[usize; N] {
-        &self[i]
+        &self.as_ref()[i]
     }
+
     fn block_mut(&mut self, i: usize) -> &mut [usize; N] {
-        &mut self[i]
+        &mut self.as_mut()[i]
     }
 
     fn first_set_block_ge(&self, start: usize) -> Option<usize> {
-        (start..self.len()).find(|&i| self[i].iter().any(|&w| w != 0))
+        self.as_ref()[start..]
+            .iter()
+            .position(|blk| blk.iter().any(|&w| w != 0))
+            .map(|i| start + i)
     }
 
     fn first_unset_block_ge(&self, start: usize) -> Option<usize> {
-        (start..self.len()).find(|&i| self[i].iter().any(|&w| w != usize::MAX))
+        self.as_ref()[start..]
+            .iter()
+            .position(|blk| blk.iter().any(|&w| w != usize::MAX))
+            .map(|i| start + i)
     }
 }
+
 
 /// A fixed‐size bitset atop any `BlockStorage<N>`.
 pub struct BitSet<S, const N: usize>
