@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use pror::fixed_bitset::*;
+    use pror::bitset::*;
 
     // Use 1 word per block (64 bits per block)
     type BS1 = BitSet<Vec<[usize; 1]>, 1>;
