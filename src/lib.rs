@@ -1,4 +1,5 @@
 pub mod avl_tree;
+pub mod fixed_bitset;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
