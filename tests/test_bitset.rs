@@ -83,8 +83,8 @@ mod tests {
 
 #[cfg(test)]
 mod iter_tests {
-    use pror::fixed_bitset::*;
     use pror::bitset::BitSetT;
+    use pror::fixed_bitset::*;
     type BS1 = BitSet<Vec<[usize; 1]>, 1>;
 
     #[test]
@@ -127,5 +127,41 @@ mod iter_tests {
         let d2: Vec<_> = b.iter_difference(&a).collect();
         assert_eq!(d2, vec![6]);
     }
-}
 
+    #[test]
+    fn test_set_between_same_block() {
+        let mut bs = BS1::new(1);
+        bs.set_between(5, 20);
+        for i in 0..5 {
+            assert!(!bs.contains(i), "bit {} should be clear", i);
+        }
+        for i in 5..20 {
+            assert!(bs.contains(i), "bit {} should be set", i);
+        }
+        assert!(!bs.contains(20), "bit 20 should be clear");
+    }
+
+    #[test]
+    fn test_set_between_multiple_blocks() {
+        let mut bs = BS1::new(1);
+        bs.set_between(10, 75);
+        assert!(!bs.contains(9), "bit 9 should be clear");
+        for i in 10..75 {
+            assert!(bs.contains(i), "bit {} should be set", i);
+        }
+        assert!(!bs.contains(75), "bit 75 should be clear");
+    }
+
+    #[test]
+    fn test_set_between_full_block_range() {
+        let mut bs = BS1::new(0);
+        bs.set_between(0, usize::BITS as usize);
+        for i in 0..(usize::BITS as usize) {
+            assert!(bs.contains(i), "bit {} should be set", i);
+        }
+        assert!(
+            !bs.contains(usize::BITS as usize),
+            "bit BITS_PER_BLOCK should be clear"
+        );
+    }
+}

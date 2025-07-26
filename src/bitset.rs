@@ -2,6 +2,7 @@ use std::iter;
 
 /// A generic BitSet interface capturing common bitset operations.
 pub trait BitSetT {
+    fn create() -> Self;
     /// Ensure capacity for at least `bits` bits. Does not shrink.
     fn grow(&mut self, bits: usize);
     /// Total number of bits currently supported.
@@ -10,6 +11,9 @@ pub trait BitSetT {
     fn clear_all(&mut self);
     /// Set a bit to 1, resizing if necessary.
     fn set(&mut self, bit: usize);
+
+    fn set_between(&mut self, start_bit_incl: usize, end_bit_excl: usize);
+
     /// Clear a bit to 0.
     fn clear(&mut self, bit: usize);
     /// Test if a bit is set.
@@ -26,10 +30,39 @@ pub trait BitSetT {
 
     /// In-place union: `self |= other`.
     fn union_with(&mut self, other: &Self);
+
     /// In-place intersection: `self &= other`.
     fn intersect_with(&mut self, other: &Self);
     /// In-place difference: `self &= !other`.
     fn difference_with(&mut self, other: &Self);
+
+    fn intersect(&mut self, a: &Self, b: &Self);
+
+    fn iter(&self) -> impl Iterator<Item = usize> + '_ {
+        iter::from_fn(move || self.first_set())
+    }
+
+    // TODO: try specialize and make faster
+    fn intersect_first_set_ge(&self, other: &impl BitSetT, ge: usize) -> Option<usize> {
+        match (self.first_set_ge(ge), other.first_set_ge(ge)) {
+            (Some(a), Some(b)) => {
+                if a == b {
+                    Some(a)
+                } else {
+                    self.intersect_first_set_ge(other, b.max(a))
+                }
+            }
+            (Some(_), None) | (None, Some(_)) | (None, None) => None,
+        }
+    }
+
+    fn intersect_first_set(&self, other: &impl BitSetT) -> Option<usize> {
+        self.intersect_first_set_ge(other, 0)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.first_set().is_none()
+    }
 
     fn iter_union<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = usize> + 'a {
         let mut next_idx = 0;
