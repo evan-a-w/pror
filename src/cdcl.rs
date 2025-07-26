@@ -3,29 +3,29 @@ use crate::fixed_bitset;
 use crate::pool::Pool;
 use crate::sat::*;
 use itertools::Either;
-use std::collections::HashMap;
+use rand::prelude::*;
+use std::collections::BTreeMap;
 
 trait ConfigT: Sized {
     type BitSet: BitSetT + Clone;
 
-    fn choose_variable(state: &State<Self>) -> Option<usize>;
+    fn choose_variable(state: &mut State<Self>) -> Option<usize>;
 
+    const DEBUG: bool;
     const USE_BACKTRACK_STATE: bool;
 }
 
-struct FirstSetConfig {}
-
-impl ConfigT for FirstSetConfig {
-    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
-
-    fn choose_variable(state: &State<Self>) -> Option<usize> {
-        state.unassigned_variables.first_unset()
-    }
-
-    const USE_BACKTRACK_STATE: bool = false;
+#[macro_export]
+macro_rules! debug {
+    ($($arg:tt)+) => {
+        // note: `const DEBUG_ENABLED` forces compile-time evaluation of the const
+        if Config::DEBUG {
+            eprintln!($($arg)+);
+        }
+    };
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Reason {
     Decision(Literal),
     ClauseIdx(usize),
@@ -45,7 +45,7 @@ impl<BitSet: BitSetT> TrailEntry<BitSet> {
     }
 }
 
-struct State<Config: ConfigT> {
+pub struct State<Config: ConfigT> {
     immediate_result: Option<SatResult>,
     all_variables: Config::BitSet,
     assignments: Config::BitSet,
@@ -61,9 +61,10 @@ struct State<Config: ConfigT> {
     next_literal: Option<Literal>,
     bitset_pool: Pool<Config::BitSet>,
     iterations: usize,
+    rng: rand::rngs::ThreadRng,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct ClauseIdx(usize);
 
 #[derive(Clone, Copy)]
@@ -85,10 +86,10 @@ enum Action {
 }
 
 impl<Config: ConfigT> State<Config> {
-    fn assignments(&self) -> HashMap<usize, bool> {
+    fn assignments(&self) -> BTreeMap<usize, bool> {
         self.all_variables
             .iter()
-            .map(|var| (var, !self.assignments.contains(var)))
+            .map(|var| (var, self.assignments.contains(var)))
             .collect()
     }
 
@@ -101,7 +102,7 @@ impl<Config: ConfigT> State<Config> {
             Some(var) => {
                 match self
                     .unassigned_variables
-                    .intersect_first_set_ge(&clause.variables, var)
+                    .intersect_first_set_ge(&clause.variables, var + 1)
                 {
                     Some(_) => None,
                     None => {
@@ -203,6 +204,10 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn add_to_trail(&mut self, mut trail_entry: TrailEntry<Config::BitSet>) {
+        debug!(
+            "adding to trail at decision level {}: {:?}",
+            trail_entry.decision_level, trail_entry.literal
+        );
         let literal = trail_entry.literal;
         let var = literal.variable();
         if literal.value() {
@@ -210,6 +215,12 @@ impl<Config: ConfigT> State<Config> {
         } else {
             self.assignments.clear(var);
         }
+        assert!(
+            self.trail_entry_idx_by_var[var] == usize::MAX,
+            "trail entry for var {} already exists: {:?}",
+            var,
+            self.trail_entry_idx_by_var[var]
+        );
         self.trail_entry_idx_by_var[var] = self.trail.len();
         self.unassigned_variables.clear(var);
         trail_entry.satisfied_clauses = Some(self.satisfy_clauses(&trail_entry));
@@ -229,6 +240,10 @@ impl<Config: ConfigT> State<Config> {
         literal: Literal,
         clause_idx: ClauseIdx,
     ) -> UnitPropagationResult {
+        debug!(
+            "found unit clause: {:?} in clause idx: {:?}",
+            literal, clause_idx.0
+        );
         let decision_level = self.decision_level;
         let trail_entry = TrailEntry {
             literal,
@@ -404,7 +419,7 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn backtrack(&mut self, failed_clause_idx: ClauseIdx) -> Option<Literal> {
-        let (mut learned_clause, remove_greater_than) =
+        let (learned_clause, remove_greater_than) =
             self.learn_clause_from_failure(failed_clause_idx);
         for lit in learned_clause.iter_literals() {
             let len = self.clauses.len();
@@ -474,7 +489,7 @@ impl<Config: ConfigT> State<Config> {
         if let Some(lit) = self.next_literal.take() {
             return self.react(Action::Continue(lit, false));
         }
-        match Config::choose_variable(&self) {
+        match Config::choose_variable(self) {
             None => {
                 let assignments = self.assignments();
                 let res = SatResult::Sat(assignments);
@@ -524,10 +539,14 @@ impl<Config: ConfigT> State<Config> {
 
         for var in vars {
             variables_bitset.set(var);
+        }
+
+        for _ in 0..num_vars {
             clauses_by_var.push(bitset_pool.acquire(|| Config::BitSet::create()));
         }
 
         let mut instantly_unsat = false;
+
         for (idx, clause) in clauses.iter().enumerate() {
             if clause.variables.is_empty() {
                 instantly_unsat = true;
@@ -539,7 +558,7 @@ impl<Config: ConfigT> State<Config> {
         let immediate_result = if instantly_unsat {
             Some(SatResult::Unsat)
         } else if clauses.is_empty() {
-            Some(SatResult::Sat(HashMap::new()))
+            Some(SatResult::Sat(BTreeMap::new()))
         } else {
             None
         };
@@ -547,6 +566,7 @@ impl<Config: ConfigT> State<Config> {
         unsatisfied_clauses.set_between(0, clauses.len());
         let all_variables = variables_bitset.clone();
         let unassigned_variables = variables_bitset;
+        let rng = rand::rng();
         State {
             immediate_result,
             all_variables,
@@ -563,13 +583,66 @@ impl<Config: ConfigT> State<Config> {
             next_literal: None,
             bitset_pool,
             iterations: 0,
+            rng,
         }
     }
 
     pub fn solve(formula: Vec<Vec<isize>>) -> SatResult {
-        let mut bitset_pool = Pool::new();
+        let mut bitset_pool: Pool<Config::BitSet> = Pool::new();
         let formula = Formula::new(formula, &mut bitset_pool);
-        let mut state = State::<FirstSetConfig>::new(formula, bitset_pool);
+        // for clause in &formula.clauses {
+        //     println!("clause: {:?}", clause.variables.iter().collect::<Vec<_>>());
+        // }
+        let mut state = Self::new(formula, bitset_pool);
         state.run()
     }
 }
+
+pub struct FirstSetConfig {}
+pub struct RandomConfig {}
+pub struct FirstSetConfigDebug {}
+
+impl ConfigT for FirstSetConfig {
+    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
+
+    fn choose_variable(state: &mut State<Self>) -> Option<usize> {
+        state.unassigned_variables.first_set()
+    }
+
+    const DEBUG: bool = false;
+    const USE_BACKTRACK_STATE: bool = false;
+}
+
+impl ConfigT for RandomConfig {
+    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
+
+    fn choose_variable(state: &mut State<Self>) -> Option<usize> {
+        let len = state.unassigned_variables.count();
+        if len == 0 {
+            None
+        } else {
+            let num = state.rng.gen_range(0..len);
+            match state.unassigned_variables.nth(num) {
+                Some(var) => Some(var),
+                None => panic!("unassigned_variables should have been non-empty, but was empty"),
+            }
+        }
+    }
+
+    const DEBUG: bool = false;
+    const USE_BACKTRACK_STATE: bool = false;
+}
+
+impl ConfigT for FirstSetConfigDebug {
+    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
+
+    fn choose_variable(state: &mut State<Self>) -> Option<usize> {
+        state.unassigned_variables.first_set()
+    }
+
+    const DEBUG: bool = true;
+    const USE_BACKTRACK_STATE: bool = false;
+}
+
+pub type Default = State<RandomConfig>;
+pub type DefaultDebug = State<FirstSetConfigDebug>;

@@ -335,6 +335,42 @@ where
             blk[end_w] |= mask;
         }
     }
+    pub fn count(&self) -> usize {
+        let mut acc = 0;
+        for b in 0..self.storage.block_count() {
+            for &w in self.storage.block(b).iter() {
+                acc += w.count_ones() as usize;
+            }
+        }
+        acc
+    }
+
+    pub fn nth(&self, n: usize) -> Option<usize> {
+        let mut count = 0;
+        let bits_per_word = usize::BITS as usize;
+        for b in 0..self.storage.block_count() {
+            let blk = self.storage.block(b);
+            for wi in 0..N {
+                let w = blk[wi];
+                let pop = w.count_ones() as usize;
+                if count + pop <= n {
+                    count += pop;
+                    continue;
+                }
+                let mut mask = w;
+                let mut rem = n - count;
+                while mask != 0 {
+                    let tz = mask.trailing_zeros() as usize;
+                    if rem == 0 {
+                        return Some(b * Self::BITS_PER_BLOCK + wi * bits_per_word + tz);
+                    }
+                    rem -= 1;
+                    mask &= !(1 << tz);
+                }
+            }
+        }
+        None
+    }
 }
 
 impl<S, const N: usize> BitSetT for BitSet<S, N>
@@ -353,6 +389,15 @@ where
     fn set(&mut self, bit: usize) {
         self.set(bit);
     }
+
+    fn nth(&self, n: usize) -> Option<usize> {
+        self.nth(n)
+    }
+
+    fn count(&self) -> usize {
+        self.count()
+    }
+
     fn set_between(&mut self, a: usize, b: usize) {
         self.set_between(a, b);
     }

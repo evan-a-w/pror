@@ -1,10 +1,11 @@
 use crate::bitset::BitSetT;
 use crate::pool::Pool;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::collections::HashSet;
 
+#[derive(Debug)]
 pub enum SatResult {
-    Sat(HashMap<usize, bool>),
+    Sat(BTreeMap<usize, bool>),
     Unsat,
 }
 

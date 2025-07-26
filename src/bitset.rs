@@ -38,20 +38,29 @@ pub trait BitSetT {
 
     fn intersect(&mut self, a: &Self, b: &Self);
 
+    fn nth(&self, n: usize) -> Option<usize>;
+
+    fn count(&self) -> usize;
+
     fn iter(&self) -> impl Iterator<Item = usize> + '_ {
-        iter::from_fn(move || self.first_set())
+        let mut after = 0;
+        iter::from_fn(move || {
+            let res = self.first_set_ge(after);
+            if let Some(res) = res {
+                after = res + 1;
+                Some(res)
+            } else {
+                None
+            }
+        })
     }
 
     // TODO: try specialize and make faster
     fn intersect_first_set_ge(&self, other: &impl BitSetT, ge: usize) -> Option<usize> {
         match (self.first_set_ge(ge), other.first_set_ge(ge)) {
-            (Some(a), Some(b)) => {
-                if a == b {
-                    Some(a)
-                } else {
-                    self.intersect_first_set_ge(other, b.max(a))
-                }
-            }
+            (Some(a), Some(b)) if a == b => Some(a),
+            (Some(a), Some(b)) if a < b => self.intersect_first_set_ge(other, b),
+            (Some(a), Some(_)) => self.intersect_first_set_ge(other, a),
             (Some(_), None) | (None, Some(_)) | (None, None) => None,
         }
     }

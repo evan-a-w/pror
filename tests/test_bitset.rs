@@ -164,4 +164,108 @@ mod iter_tests {
             "bit BITS_PER_BLOCK should be clear"
         );
     }
+
+    #[test]
+    fn test_first_set() {
+        let mut a = BS1::new(0);
+        a.set(0);
+        a.set(1);
+        a.set(10);
+        a.set(63);
+        a.set(64);
+        a.set(100);
+        a.set(12313);
+        assert_eq!(a.first_set(), Some(0));
+        assert_eq!(a.first_set_ge(1), Some(1));
+        assert_eq!(a.first_set_ge(2), Some(10));
+        assert_eq!(a.first_set_ge(101), Some(12313));
+        assert_eq!(a.first_unset(), Some(2));
+        assert_eq!(a.first_unset_ge(64), Some(65));
+    }
+
+    #[test]
+    fn test_nth() {
+        let mut a = BS1::new(0);
+        a.set(0);
+        a.set(1);
+        a.set(10);
+        a.set(63);
+        a.set(64);
+        a.set(100);
+        a.set(12313);
+        assert_eq!(a.nth(0), Some(0));
+        assert_eq!(a.nth(1), Some(1));
+        assert_eq!(a.nth(2), Some(10));
+        assert_eq!(a.nth(3), Some(63));
+        assert_eq!(a.nth(4), Some(64));
+        assert_eq!(a.nth(5), Some(100));
+        assert_eq!(a.nth(6), Some(12313));
+        assert_eq!(a.nth(7), None);
+        assert_eq!(a.nth(8), None);
+    }
+
+    #[test]
+    fn test_intersect_first_set_basic() {
+        let mut a = BS1::new(2);
+        let mut b = BS1::new(2);
+        a.set(3);
+        a.set(5);
+        a.set(10);
+        b.set(2);
+        b.set(5);
+        b.set(10);
+        assert_eq!(a.intersect_first_set(&b), Some(5));
+    }
+
+    #[test]
+    fn test_intersect_first_set_ge_variations() {
+        let mut a = BS1::new(2);
+        let mut b = BS1::new(2);
+        a.set(3);
+        a.set(7);
+        a.set(15);
+        b.set(7);
+        b.set(20);
+
+        // First common ≥ 0 is 7
+        assert_eq!(a.intersect_first_set_ge(&b, 0), Some(7));
+
+        // No common ≥ 8
+        assert_eq!(a.intersect_first_set_ge(&b, 8), None);
+
+        // ge exactly at a common bit
+        assert_eq!(a.intersect_first_set_ge(&b, 7), Some(7));
+
+        // ge at 15: a has 15, b.next is 20 → no intersection
+        assert_eq!(a.intersect_first_set_ge(&b, 15), None);
+    }
+
+    #[test]
+    fn test_no_intersection_and_empty() {
+        let mut a = BS1::new(1);
+        let mut b = BS1::new(1);
+        a.set(1);
+        a.set(4);
+        b.set(2);
+        b.set(5);
+        assert_eq!(a.intersect_first_set(&b), None);
+
+        let empty_a = BS1::new(1);
+        let empty_b = BS1::new(1);
+        assert_eq!(empty_a.intersect_first_set(&empty_b), None);
+    }
+
+    #[test]
+    fn test_intersect_at_ge_edge() {
+        let mut a = BS1::new(1);
+        let mut b = BS1::new(1);
+        a.set(8);
+        b.set(8);
+
+        // exact edge match
+        assert_eq!(a.intersect_first_set_ge(&b, 8), Some(8));
+
+        // beyond edge → none
+        assert_eq!(a.intersect_first_set_ge(&b, 9), None);
+    }
 }
