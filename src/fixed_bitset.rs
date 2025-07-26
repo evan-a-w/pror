@@ -1,3 +1,5 @@
+use std::iter;
+
 /// A storage of fixed‐size blocks of `usize`.
 /// The bitset treats each block as `N * usize::BITS` bits.
 pub trait BlockStorage<const N: usize>: Sized {
@@ -9,6 +11,8 @@ pub trait BlockStorage<const N: usize>: Sized {
     fn block(&self, i: usize) -> &[usize; N];
     /// Mutable access to the `i`th `[usize; N]` block.
     fn block_mut(&mut self, i: usize) -> &mut [usize; N];
+
+    fn resize(&mut self, blocks: usize);
 
     /// Return the index of the first block ≥ `start` with any set bit.
     fn first_set_block_ge(&self, start: usize) -> Option<usize>;
@@ -25,6 +29,14 @@ pub trait BlockStorage<const N: usize>: Sized {
     fn first_unset_block(&self) -> Option<usize> {
         self.first_unset_block_ge(0)
     }
+}
+
+/// A resizable bitset atop any `BlockStorage<N>`
+pub struct BitSet<S, const N: usize>
+where
+    S: BlockStorage<N>,
+{
+    storage: S,
 }
 
 /// Generic `BlockStorage` for any container of `[usize; N]` that can be default-constructed,
@@ -47,6 +59,10 @@ where
         &self.as_ref()[i]
     }
 
+    fn resize(&mut self, blocks: usize) {
+        self.extend(std::iter::repeat([0; N]).take(blocks - self.block_count()));
+    }
+
     fn block_mut(&mut self, i: usize) -> &mut [usize; N] {
         &mut self.as_mut()[i]
     }
@@ -67,14 +83,6 @@ where
 }
 
 
-/// A fixed‐size bitset atop any `BlockStorage<N>`.
-pub struct BitSet<S, const N: usize>
-where
-    S: BlockStorage<N>,
-{
-    storage: S,
-}
-
 impl<S, const N: usize> BitSet<S, N>
 where
     S: BlockStorage<N>,
@@ -87,13 +95,20 @@ where
         BitSet { storage: S::with_capacity(blocks) }
     }
 
-    /// Total bits = blocks × bits_per_block.
+    /// Ensure capacity for at least `bits` bits. Does not shrink.
+    pub fn grow(&mut self, bits: usize) {
+        let needed_blocks = (bits + Self::BITS_PER_BLOCK - 1) / Self::BITS_PER_BLOCK;
+        let current = self.storage.block_count();
+        if needed_blocks > current {
+            self.storage.resize(needed_blocks);
+        }
+    }
+
+    /// Total bits currently supported.
     pub fn capacity(&self) -> usize {
         self.storage.block_count() * Self::BITS_PER_BLOCK
     }
 
-    /// Helper to locate a global bit index:
-    /// returns (block_index, word_index, bit_offset).
     #[inline]
     fn locate(bit: usize) -> (usize, usize, usize) {
         let block_idx = bit / Self::BITS_PER_BLOCK;
@@ -103,118 +118,112 @@ where
         (block_idx, word_idx, offset)
     }
 
-    /// Clear all bits.
-    pub fn clear_all(&mut self) {
-        for i in 0..self.storage.block_count() {
-            self.storage.block_mut(i).fill(0);
-        }
-    }
-
-    /// Set a bit to 1.
+    /// Set a bit to 1, growing if needed.
     pub fn set(&mut self, bit: usize) {
+        self.grow(bit + 1);
         let (b, w, o) = Self::locate(bit);
         self.storage.block_mut(b)[w] |= 1 << o;
     }
 
-    /// Clear a bit to 0.
+    /// Clear a bit to 0 (no grow).
     pub fn clear(&mut self, bit: usize) {
+        if bit >= self.capacity() { return; }
         let (b, w, o) = Self::locate(bit);
         self.storage.block_mut(b)[w] &= !(1 << o);
     }
 
-    /// Test if a bit is set.
+    pub fn clear_all(&mut self) {
+        for b in 0..self.storage.block_count() {
+            let blk = self.storage.block_mut(b);
+            for w in blk.iter_mut() {
+                *w = 0;
+            }
+        }
+    }
+
+    /// Test if a bit is set (no grow).
     pub fn contains(&self, bit: usize) -> bool {
+        if bit >= self.capacity() { return false; }
         let (b, w, o) = Self::locate(bit);
         (self.storage.block(b)[w] >> o) & 1 != 0
     }
 
-    /// Find the first set bit in the entire bitset.
-    /// Wraps `first_set_ge(0)` to avoid code duplication.
+    /// Find the first set bit, or `None`.
     pub fn first_set(&self) -> Option<usize> {
         self.first_set_ge(0)
     }
 
-    /// Find the first unset bit in the entire bitset.
-    /// Wraps `first_unset_ge(0)` to avoid code duplication.
+    /// Find the first unset bit, or `None`.
     pub fn first_unset(&self) -> Option<usize> {
         self.first_unset_ge(0)
     }
 
-    /// Find the first set bit ≥ `bit`.
+    /// Find first set ≥ `bit`.
     pub fn first_set_ge(&self, bit: usize) -> Option<usize> {
         let (start_b, start_w, offset) = Self::locate(bit);
-        if start_b >= self.storage.block_count() {
-            return None;
-        }
+        if start_b >= self.storage.block_count() { return None; }
         let blk = self.storage.block(start_b);
         let mask = blk[start_w] & (!0usize << offset);
         if mask != 0 {
-            let tz = mask.trailing_zeros() as usize;
             return Some(start_b * Self::BITS_PER_BLOCK
-                        + start_w * usize::BITS as usize
-                        + tz);
+                + start_w * usize::BITS as usize
+                + mask.trailing_zeros() as usize);
         }
-        for wi in (start_w + 1)..N {
+        for wi in start_w+1..N {
             let w = blk[wi];
             if w != 0 {
-                let tz = w.trailing_zeros() as usize;
                 return Some(start_b * Self::BITS_PER_BLOCK
-                            + wi * usize::BITS as usize
-                            + tz);
+                    + wi * usize::BITS as usize
+                    + w.trailing_zeros() as usize);
             }
         }
-        let b2 = self.storage.first_set_block_ge(start_b + 1)?;
+        let b2 = self.storage.first_set_block_ge(start_b+1)?;
         let blk2 = self.storage.block(b2);
-        for (w_i, &w) in blk2.iter().enumerate() {
+        for (wi, &w) in blk2.iter().enumerate() {
             if w != 0 {
-                let tz = w.trailing_zeros() as usize;
                 return Some(b2 * Self::BITS_PER_BLOCK
-                            + w_i * usize::BITS as usize
-                            + tz);
+                    + wi * usize::BITS as usize
+                    + w.trailing_zeros() as usize);
             }
         }
         None
     }
 
-    /// Find the first unset bit ≥ `bit`.
+    /// Find first unset ≥ `bit`.
     pub fn first_unset_ge(&self, bit: usize) -> Option<usize> {
         let (start_b, start_w, offset) = Self::locate(bit);
-        if start_b >= self.storage.block_count() {
-            return None;
-        }
+        if start_b >= self.storage.block_count() { return None; }
         let blk = self.storage.block(start_b);
         let inv = !blk[start_w] & (!0usize << offset);
         if inv != 0 {
-            let tz = inv.trailing_zeros() as usize;
             return Some(start_b * Self::BITS_PER_BLOCK
-                        + start_w * usize::BITS as usize
-                        + tz);
+                + start_w * usize::BITS as usize
+                + inv.trailing_zeros() as usize);
         }
-        for wi in (start_w + 1)..N {
+        for wi in start_w+1..N {
             let w = blk[wi];
             if w != usize::MAX {
-                let tz = (!w).trailing_zeros() as usize;
                 return Some(start_b * Self::BITS_PER_BLOCK
-                            + wi * usize::BITS as usize
-                            + tz);
+                    + wi * usize::BITS as usize
+                    + (!w).trailing_zeros() as usize);
             }
         }
-        let b2 = self.storage.first_unset_block_ge(start_b + 1)?;
+        let b2 = self.storage.first_unset_block_ge(start_b+1)?;
         let blk2 = self.storage.block(b2);
-        for (w_i, &w) in blk2.iter().enumerate() {
+        for (wi, &w) in blk2.iter().enumerate() {
             if w != usize::MAX {
-                let tz = (!w).trailing_zeros() as usize;
                 return Some(b2 * Self::BITS_PER_BLOCK
-                            + w_i * usize::BITS as usize
-                            + tz);
+                    + wi * usize::BITS as usize
+                    + (!w).trailing_zeros() as usize);
             }
         }
         None
     }
 
-    /// In‐place union: `self |= other`.
+    /// Union: grows to other.capacity(), then `self |= other`.
     pub fn union_with(&mut self, other: &Self) {
-        for b in 0..self.storage.block_count() {
+        self.grow(other.capacity());
+        for b in 0..self.storage.block_count().min(other.storage.block_count()) {
             let me = self.storage.block_mut(b);
             let them = other.storage.block(b);
             for (a, &bb) in me.iter_mut().zip(them.iter()) {
@@ -223,9 +232,9 @@ where
         }
     }
 
-    /// In‐place intersection: `self &= other`.
+    /// Intersection: no grow.
     pub fn intersect_with(&mut self, other: &Self) {
-        for b in 0..self.storage.block_count() {
+        for b in 0..self.storage.block_count().min(other.storage.block_count()) {
             let me = self.storage.block_mut(b);
             let them = other.storage.block(b);
             for (a, &bb) in me.iter_mut().zip(them.iter()) {
@@ -234,9 +243,9 @@ where
         }
     }
 
-    /// In‐place difference: `self &= !other`.
+    /// Difference: no grow.
     pub fn difference_with(&mut self, other: &Self) {
-        for b in 0..self.storage.block_count() {
+        for b in 0..self.storage.block_count().min(other.storage.block_count()) {
             let me = self.storage.block_mut(b);
             let them = other.storage.block(b);
             for (a, &bb) in me.iter_mut().zip(them.iter()) {
@@ -245,4 +254,3 @@ where
         }
     }
 }
-

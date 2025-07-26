@@ -70,4 +70,13 @@ mod tests {
         a.difference_with(&b);
         assert!(a.contains(1) && !a.contains(2));
     }
+
+    #[test]
+    fn test_grow_on_set() {
+        let mut bs = BS1::new(1);
+        assert_eq!(bs.capacity(), usize::BITS as usize);
+        bs.set(usize::BITS as usize + 5);
+        assert!(bs.contains(usize::BITS as usize + 5));
+        assert!(bs.capacity() > usize::BITS as usize);
+    }
 }
