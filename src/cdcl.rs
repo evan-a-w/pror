@@ -340,7 +340,6 @@ impl<Config: ConfigT> State<Config> {
     fn last_assigned_lit_in(
         &self,
         clause: &Clause<Config::BitSet>,
-        _seen: &Config::BitSet,
     ) -> Option<Literal> {
         let mut last: Option<Literal> = None;
         for lit in clause.iter_literals() {
@@ -348,7 +347,6 @@ impl<Config: ConfigT> State<Config> {
             let idx = self.trail_entry_idx_by_var[var];
             let entry = &self.trail[idx];
             if entry.is_from_decision_point()
-                // || seen.contains(var)
                 || !clause.variables.contains(var)
                 || entry.decision_level != self.decision_level
             {
@@ -402,27 +400,18 @@ impl<Config: ConfigT> State<Config> {
                 negatives,
             }
         };
-        let mut seen = self.bitset_pool.acquire(|| Config::BitSet::create());
-        seen.clear_all();
         loop {
-            let lit = self.last_assigned_lit_in(&learned, &seen);
-            println!("See lit {:?}", lit);
+            let lit = self.last_assigned_lit_in(&learned);
             match lit {
                 None => break,
                 Some(lit) => {
                     let entry = &self.trail[self.trail_entry_idx_by_var[lit.variable()]];
                     match entry.reason {
-                        Reason::Decision(_) => {
-                            seen.set(lit.variable());
-                            continue;
-                        }
+                        Reason::Decision(_) => continue,
                         Reason::ClauseIdx(clause_idx) => {
                             let resolve_with = &self.clauses[clause_idx];
                             match learned.can_resolve(&resolve_with, lit.variable()) {
-                                false => {
-                                    seen.set(lit.variable());
-                                    continue;
-                                }
+                                false => continue,
                                 true => {
                                     learned.resolve_exn(resolve_with, lit.variable());
 
@@ -436,7 +425,6 @@ impl<Config: ConfigT> State<Config> {
                 }
             }
         }
-        self.bitset_pool.release(seen);
         let backtrack_level = self.second_highest_decision_level(&learned);
         debug!(
             self.debug_writer,
