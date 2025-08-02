@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 pub trait ConfigT: Sized {
     type BitSet: BitSetT + Clone;
 
-    fn choose_variable(state: &mut State<Self>) -> Option<usize>;
+    fn choose_literal(state: &mut State<Self>) -> Option<Literal>;
 
     const DEBUG: bool;
     const USE_BACKTRACK_STATE: bool;
@@ -191,6 +191,12 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn undo_entry(&mut self, trail_entry: &mut TrailEntry<Config::BitSet>) {
+        debug!(
+            self.debug_writer,
+            "undoing trail entry: {} at decision level {}",
+            trail_entry.literal.to_string(),
+            trail_entry.decision_level
+        );
         let satisfied_clauses = std::mem::take(&mut trail_entry.satisfied_clauses);
         match satisfied_clauses {
             None => (),
@@ -360,7 +366,17 @@ impl<Config: ConfigT> State<Config> {
             .filter_map(|lit| {
                 let idx = self.trail_entry_idx_by_var[lit.variable()];
                 let entry = &self.trail[idx];
-                if !entry.is_from_decision_point() && entry.decision_level == self.decision_level {
+                let can_resolve = match entry.reason {
+                    Reason::Decision(_) => false,
+                    Reason::ClauseIdx(clause_idx) => {
+                        let resolve_with = &self.clauses[clause_idx];
+                        clause.can_resolve(resolve_with, entry.literal.variable())
+                    }
+                };
+                if !entry.is_from_decision_point()
+                    && entry.decision_level == self.decision_level
+                    && can_resolve
+                {
                     Some(idx)
                 } else {
                     None
@@ -385,14 +401,20 @@ impl<Config: ConfigT> State<Config> {
                 negatives,
             }
         };
-        loop {
+        while !self.only_one_at_level(&learned) {
             match self.next_entry_for_learned_clause(&learned) {
-                None => assert!(false),
+                None => assert!(
+                    false,
+                    "More than one literal at level, but no next entry found for learned clause"
+                ),
                 Some(idx) => {
                     let entry = &self.trail[idx];
                     let lit = entry.literal;
                     match entry.reason {
-                        Reason::Decision(_) => assert!(false),
+                        Reason::Decision(_) => assert!(
+                            false,
+                            "Unexpected decision in trail entry for learned clause"
+                        ),
                         Reason::ClauseIdx(clause_idx) => {
                             let resolve_with = &self.clauses[clause_idx];
                             debug!(
@@ -404,10 +426,6 @@ impl<Config: ConfigT> State<Config> {
                             );
 
                             learned.resolve_exn(resolve_with, lit.variable());
-
-                            if self.only_one_at_level(&learned) {
-                                break;
-                            }
                         }
                     }
                 }
@@ -452,10 +470,9 @@ impl<Config: ConfigT> State<Config> {
             self.trail.last().unwrap().decision_level
         };
         match trail_entry {
-            None => None,
             Some(last_entry) if last_entry.continue_ => Some(last_entry.literal.negate()),
 
-            Some(_) => None,
+            Some(_) | None => None,
         }
     }
 
@@ -535,16 +552,16 @@ impl<Config: ConfigT> State<Config> {
         if let Some(lit) = self.next_literal.take() {
             return self.react(Action::Continue(lit, false));
         }
-        match Config::choose_variable(self) {
+        match Config::choose_literal(self) {
             None => {
                 let assignments = self.assignments();
                 let res = SatResult::Sat(assignments);
                 StepResult::Done(res)
             }
-            Some(var) => {
+            Some(literal) => {
                 self.decision_level += 1;
-                let lit = literal_override.unwrap_or_else(|| Literal::new(var, true));
-                self.react(Action::Continue(lit, true))
+                let literal = literal_override.unwrap_or_else(|| literal);
+                self.react(Action::Continue(literal, true))
             }
         }
     }
@@ -554,7 +571,12 @@ impl<Config: ConfigT> State<Config> {
         if let Some(res) = self.immediate_result.take() {
             return StepResult::Done(res);
         }
-        match self.unit_propagate() {
+        let prop_res = if self.next_literal.is_some() {
+            UnitPropagationResult::NothingToPropagate
+        } else {
+            self.unit_propagate()
+        };
+        match prop_res {
             UnitPropagationResult::NothingToPropagate => self.make_decision(literal_override),
             UnitPropagationResult::FinishedUnitPropagation => StepResult::Continue,
             UnitPropagationResult::Contradiction(ClauseIdx(idx)) => {
@@ -694,8 +716,11 @@ pub struct RandomConfigDebug {}
 impl ConfigT for FirstSetConfig {
     type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
 
-    fn choose_variable(state: &mut State<Self>) -> Option<usize> {
-        state.unassigned_variables.first_set()
+    fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
+        match state.unassigned_variables.first_set() {
+            None => None,
+            Some(var) => Some(Literal::new(var, true)),
+        }
     }
 
     const DEBUG: bool = false;
@@ -705,23 +730,29 @@ impl ConfigT for FirstSetConfig {
 impl ConfigT for FirstSetConfigDebug {
     type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
 
-    fn choose_variable(state: &mut State<Self>) -> Option<usize> {
-        state.unassigned_variables.first_set()
+    fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
+        match state.unassigned_variables.first_set() {
+            None => None,
+            Some(var) => Some(Literal::new(var, true)),
+        }
     }
 
     const DEBUG: bool = true;
     const USE_BACKTRACK_STATE: bool = true;
 }
 
-fn choose_random_variable<T: ConfigT>(state: &mut State<T>) -> Option<usize> {
+fn choose_random_literal<T: ConfigT>(state: &mut State<T>) -> Option<Literal> {
     let len = state.unassigned_variables.count();
     if len == 0 {
         None
     } else {
         let num = state.rng.random_range(0..len);
         match state.unassigned_variables.nth(num) {
-            Some(var) => Some(var),
             None => panic!("unassigned_variables should have been non-empty, but was empty"),
+            Some(var) => {
+                let value = state.rng.random_ratio(1, 2);
+                Some(Literal::new(var, value))
+            }
         }
     }
 }
@@ -729,8 +760,8 @@ fn choose_random_variable<T: ConfigT>(state: &mut State<T>) -> Option<usize> {
 impl ConfigT for RandomConfig {
     type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
 
-    fn choose_variable(state: &mut State<Self>) -> Option<usize> {
-        choose_random_variable(state)
+    fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
+        choose_random_literal(state)
     }
 
     const DEBUG: bool = false;
@@ -740,8 +771,8 @@ impl ConfigT for RandomConfig {
 impl ConfigT for RandomConfigDebug {
     type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
 
-    fn choose_variable(state: &mut State<Self>) -> Option<usize> {
-        choose_random_variable(state)
+    fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
+        choose_random_literal(state)
     }
 
     const DEBUG: bool = true;
