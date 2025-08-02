@@ -44,10 +44,13 @@ impl<BitSet: BitSetT> Clause<BitSet> {
     }
 
     pub fn to_string(&self) -> String {
-        self.iter_literals()
-            .map(|lit| lit.to_string())
-            .collect::<Vec<_>>()
-            .join(" ")
+        format!(
+            "({})",
+            self.iter_literals()
+                .map(|lit| lit.to_string())
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
     }
 
     pub fn can_resolve(&self, other: &Self, on_var: usize) -> bool {

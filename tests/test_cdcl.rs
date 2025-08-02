@@ -133,63 +133,67 @@ mod tests {
         let expect = expect![[r#"
             reacting to action: Continue(Literal { value: -1 }, true) at decision level 1
             adding to trail at decision level 1: -1
-            satisfy_clauses: clauses satisfied by literal -1: -1 5 6, -1 5 -6, -1 -5 6
+            satisfy_clauses: clauses satisfied by literal -1: (-1 5 6), (-1 5 -6), (-1 -5 6)
 
             Continue
             reacting to action: Continue(Literal { value: -2 }, true) at decision level 2
             adding to trail at decision level 2: -2
-            satisfy_clauses: clauses satisfied by literal -2: -2 4, 1 -2 -4
+            satisfy_clauses: clauses satisfied by literal -2: (-2 4), (1 -2 -4)
 
             Continue
-            found unit clause: Literal { value: 3 } in clause ("1 2 3")
-            would be contradiction with clause "1 2 -3" for literal 3
+            found unit clause: Literal { value: 3 } in clause ("(1 2 3)")
+            would be contradiction with clause "(1 2 -3)" for literal 3
             adding to trail at decision level 2: 3
-            satisfy_clauses: clauses satisfied by literal 3: 1 2 3
+            satisfy_clauses: clauses satisfied by literal 3: (1 2 3)
             reacting to action: Contradiction(1) at decision level 2
-            learned clause: "1 2" from failed clause "1 2 -3", backtrack level: 1
+            Resolving learned (1 2 -3) with (1 2 3) on 3
+            learned clause: "(1 2)" from failed clause "(1 2 -3)", backtrack level: 1
 
             Continue
-            found unit clause: Literal { value: 2 } in clause ("1 2")
+            found unit clause: Literal { value: 2 } in clause ("(1 2)")
             adding to trail at decision level 1: 2
-            satisfy_clauses: clauses satisfied by literal 2: 1 2 3, 1 2 -3, -2 4, 1 -2 -4, 1 2
-            found unit clause: Literal { value: 4 } in clause ("-2 4")
-            would be contradiction with clause "1 -2 -4" for literal 4
+            satisfy_clauses: clauses satisfied by literal 2: (1 2 3), (1 2 -3), (-2 4), (1 -2 -4), (1 2)
+            found unit clause: Literal { value: 4 } in clause ("(-2 4)")
+            would be contradiction with clause "(1 -2 -4)" for literal 4
             adding to trail at decision level 1: 4
-            satisfy_clauses: clauses satisfied by literal 4: 1 2 3, -2 4
+            satisfy_clauses: clauses satisfied by literal 4: (1 2 3), (-2 4)
             reacting to action: Contradiction(3) at decision level 1
-            learned clause: "1" from failed clause "1 -2 -4", backtrack level: 0
+            Resolving learned (1 -2 -4) with (-2 4) on 4
+            Resolving learned (1 -2) with (1 2) on 2
+            learned clause: "(1)" from failed clause "(1 -2 -4)", backtrack level: 0
 
             Continue
-            found unit clause: Literal { value: 1 } in clause ("1")
+            found unit clause: Literal { value: 1 } in clause ("(1)")
             adding to trail at decision level 0: 1
-            satisfy_clauses: clauses satisfied by literal 1: 1 2 3, 1 2 -3, 1 -2 -4, -1 5 6, -1 5 -6, -1 -5 6, 1 2, 1
+            satisfy_clauses: clauses satisfied by literal 1: (1 2 3), (1 2 -3), (1 -2 -4), (-1 5 6), (-1 5 -6), (-1 -5 6), (1 2), (1)
 
             Continue
             reacting to action: Continue(Literal { value: 3 }, true) at decision level 1
             adding to trail at decision level 1: 3
-            satisfy_clauses: clauses satisfied by literal 3: 1 2 3, 1 2 -3, -2 4, 1 -2 -4, 1 2
+            satisfy_clauses: clauses satisfied by literal 3: (1 2 3), (1 2 -3), (-2 4), (1 -2 -4), (1 2)
 
             Continue
             reacting to action: Continue(Literal { value: -5 }, true) at decision level 2
             adding to trail at decision level 2: -5
-            satisfy_clauses: clauses satisfied by literal -5: 1 2 3, -2 4, -5 -6, -1 -5 6
+            satisfy_clauses: clauses satisfied by literal -5: (1 2 3), (-2 4), (-5 -6), (-1 -5 6)
 
             Continue
-            found unit clause: Literal { value: 6 } in clause ("-1 5 6")
-            would be contradiction with clause "-1 5 -6" for literal 6
+            found unit clause: Literal { value: 6 } in clause ("(-1 5 6)")
+            would be contradiction with clause "(-1 5 -6)" for literal 6
             adding to trail at decision level 2: 6
-            satisfy_clauses: clauses satisfied by literal 6: -1 5 6
+            satisfy_clauses: clauses satisfied by literal 6: (-1 5 6)
             reacting to action: Contradiction(5) at decision level 2
-            learned clause: "-1 5" from failed clause "-1 5 -6", backtrack level: 0
+            Resolving learned (-1 5 -6) with (-1 5 6) on 6
+            learned clause: "(-1 5)" from failed clause "(-1 5 -6)", backtrack level: 0
 
             Continue
-            found unit clause: Literal { value: 2 } in clause ("1 2")
+            found unit clause: Literal { value: 2 } in clause ("(1 2)")
             adding to trail at decision level 0: 2
-            satisfy_clauses: clauses satisfied by literal 2: 1 2 3, 1 2 -3, -2 4, 1 -2 -4, 1 2
-            found unit clause: Literal { value: 4 } in clause ("-2 4")
-            would be contradiction with clause "1 -2 -4" for literal 4
+            satisfy_clauses: clauses satisfied by literal 2: (1 2 3), (1 2 -3), (-2 4), (1 -2 -4), (1 2)
+            found unit clause: Literal { value: 4 } in clause ("(-2 4)")
+            would be contradiction with clause "(1 -2 -4)" for literal 4
             adding to trail at decision level 0: 4
-            satisfy_clauses: clauses satisfied by literal 4: 1 2 3, -2 4, -5 -6, -1 -5 6
+            satisfy_clauses: clauses satisfied by literal 4: (1 2 3), (-2 4), (-5 -6), (-1 -5 6)
             reacting to action: Contradiction(3) at decision level 0
 
             Done(Unsat)

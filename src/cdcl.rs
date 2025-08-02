@@ -337,36 +337,6 @@ impl<Config: ConfigT> State<Config> {
             == 1
     }
 
-    fn last_assigned_lit_in(
-        &self,
-        clause: &Clause<Config::BitSet>,
-    ) -> Option<Literal> {
-        let mut last: Option<Literal> = None;
-        for lit in clause.iter_literals() {
-            let var = lit.variable();
-            let idx = self.trail_entry_idx_by_var[var];
-            let entry = &self.trail[idx];
-            if entry.is_from_decision_point()
-                || !clause.variables.contains(var)
-                || entry.decision_level != self.decision_level
-            {
-                continue;
-            }
-            last = match last {
-                None => Some(lit),
-                Some(prev) => {
-                    let prev_idx = self.trail_entry_idx_by_var[prev.variable()];
-                    if idx > prev_idx {
-                        Some(lit)
-                    } else {
-                        Some(prev)
-                    }
-                }
-            };
-        }
-        last
-    }
-
     fn second_highest_decision_level(&self, clause: &Clause<Config::BitSet>) -> usize {
         let mut max1 = 0;
         let mut max2 = 0;
@@ -382,6 +352,21 @@ impl<Config: ConfigT> State<Config> {
             }
         }
         max2
+    }
+
+    fn next_entry_for_learned_clause(&self, clause: &Clause<Config::BitSet>) -> Option<usize> {
+        clause
+            .iter_literals()
+            .filter_map(|lit| {
+                let idx = self.trail_entry_idx_by_var[lit.variable()];
+                let entry = &self.trail[idx];
+                if !entry.is_from_decision_point() && entry.decision_level == self.decision_level {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .max()
     }
 
     fn learn_clause_from_failure(
@@ -401,24 +386,27 @@ impl<Config: ConfigT> State<Config> {
             }
         };
         loop {
-            let lit = self.last_assigned_lit_in(&learned);
-            match lit {
-                None => break,
-                Some(lit) => {
-                    let entry = &self.trail[self.trail_entry_idx_by_var[lit.variable()]];
+            match self.next_entry_for_learned_clause(&learned) {
+                None => assert!(false),
+                Some(idx) => {
+                    let entry = &self.trail[idx];
+                    let lit = entry.literal;
                     match entry.reason {
-                        Reason::Decision(_) => continue,
+                        Reason::Decision(_) => assert!(false),
                         Reason::ClauseIdx(clause_idx) => {
                             let resolve_with = &self.clauses[clause_idx];
-                            match learned.can_resolve(&resolve_with, lit.variable()) {
-                                false => continue,
-                                true => {
-                                    learned.resolve_exn(resolve_with, lit.variable());
+                            debug!(
+                                self.debug_writer,
+                                "Resolving learned {} with {} on {}",
+                                learned.to_string(),
+                                resolve_with.to_string(),
+                                lit.variable()
+                            );
 
-                                    if self.only_one_at_level(&learned) {
-                                        break;
-                                    }
-                                }
+                            learned.resolve_exn(resolve_with, lit.variable());
+
+                            if self.only_one_at_level(&learned) {
+                                break;
                             }
                         }
                     }
@@ -482,19 +470,19 @@ impl<Config: ConfigT> State<Config> {
         }
         self.unsatisfied_clauses.set(self.clauses.len());
         self.clauses.push(learned_clause);
-
-        let res = self.remove_from_trail_helper(Some(remove_greater_than));
+        let mut res = self.remove_from_trail_helper(Some(remove_greater_than));
 
         if !Config::USE_BACKTRACK_STATE {
-            res
+            None
         } else {
             loop {
-                if self.trail.is_empty() {
-                    break None;
-                }
-                match self.remove_from_trail_helper(None) {
+                match res {
                     None => (),
                     res => break res,
+                }
+                res = self.remove_from_trail_helper(None);
+                if self.trail.is_empty() {
+                    break None;
                 }
             }
         }
@@ -519,13 +507,8 @@ impl<Config: ConfigT> State<Config> {
                     satisfied_clauses: None,
                     continue_: continue_flag,
                 };
-                let conf = self.would_be_contradiction(literal);
                 self.add_to_trail(trail_entry);
-                if let Some(conflict) = conf {
-                    self.react(Action::Contradiction(conflict.0))
-                } else {
-                    StepResult::Continue
-                }
+                StepResult::Continue
             }
             Action::Contradiction(_) if self.decision_level == 0 => {
                 StepResult::Done(SatResult::Unsat)
