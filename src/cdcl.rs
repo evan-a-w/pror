@@ -5,6 +5,7 @@ use crate::sat::*;
 use itertools::Either;
 use rand::prelude::*;
 use rand_pcg::Pcg64;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 pub trait ConfigT: Sized {
@@ -18,8 +19,23 @@ pub trait ConfigT: Sized {
 
 #[macro_export]
 macro_rules! debug {
+    // With optional writer
+    ($writer:expr, $($arg:tt)+) => {
+        if Config::DEBUG {
+            match $writer {
+                Some(ref w) => {
+                    use std::fmt::Write as _;
+                    let _ = writeln!(w.borrow_mut(), $($arg)+);
+                }
+                None => {
+                    eprintln!($($arg)+);
+                }
+            }
+        }
+    };
+
+    // Fallback: no writer provided
     ($($arg:tt)+) => {
-        // note: `const DEBUG_ENABLED` forces compile-time evaluation of the const
         if Config::DEBUG {
             eprintln!($($arg)+);
         }
@@ -63,6 +79,7 @@ pub struct State<Config: ConfigT> {
     bitset_pool: Pool<Config::BitSet>,
     iterations: usize,
     rng: Pcg64,
+    debug_writer: Option<RefCell<Box<dyn std::fmt::Write>>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -78,7 +95,7 @@ enum UnitPropagationResult {
     NothingToPropagate,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Action {
     Unsat,
     FinishedUnitPropagation,
@@ -127,21 +144,6 @@ impl<Config: ConfigT> State<Config> {
     fn first_unit_clause(&self) -> Option<(Literal, ClauseIdx)> {
         self.unsatisfied_clauses.iter().find_map(|clause_idx| {
             let clause = &self.clauses[clause_idx];
-            debug!(
-                "checking clause {:?} for unit literal, unset vars: {}",
-                self.clause_string(ClauseIdx(clause_idx)),
-                {
-                    let clause = &self.clauses[clause_idx];
-                    clause
-                        .variables
-                        .iter_intersection(&self.unassigned_variables)
-                        .map(|variable| {
-                            Literal::new(variable, !clause.negatives.contains(variable)).to_string()
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                }
-            );
             self.try_get_unit_literal(clause)
                 .map(|literal| (literal, ClauseIdx(clause_idx)))
         })
@@ -172,11 +174,15 @@ impl<Config: ConfigT> State<Config> {
                 if literal_in_unit.variable() == literal.variable()
                     && literal_in_unit.value() != literal.value()
                 {
-                    debug!(
-                        "would be contradiction with clause {:?} for literal {}",
-                        self.clause_string(ClauseIdx(clause_idx)),
-                        literal.to_string()
-                    );
+                    if Config::DEBUG {
+                        let s = self.clause_string(ClauseIdx(clause_idx));
+                        debug!(
+                            self.debug_writer,
+                            "would be contradiction with clause {:?} for literal {}",
+                            s,
+                            literal.to_string()
+                        );
+                    }
                     Some(ClauseIdx(clause_idx))
                 } else {
                     None
@@ -219,6 +225,7 @@ impl<Config: ConfigT> State<Config> {
         }
         self.scratch_clause_bitset = Some(scratch_clause_bitset);
         debug!(
+            self.debug_writer,
             "satisfy_clauses: clauses satisfied by literal {}: {}",
             literal.to_string(),
             newly_set
@@ -232,6 +239,7 @@ impl<Config: ConfigT> State<Config> {
 
     fn add_to_trail(&mut self, mut trail_entry: TrailEntry<Config::BitSet>) {
         debug!(
+            self.debug_writer,
             "adding to trail at decision level {}: {}",
             trail_entry.decision_level,
             trail_entry.literal.to_string()
@@ -264,12 +272,7 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn clause_string(&self, clause_idx: ClauseIdx) -> String {
-        let clause = &self.clauses[clause_idx.0];
-        clause
-            .iter_literals()
-            .map(|lit| lit.to_string())
-            .collect::<Vec<_>>()
-            .join(" ")
+        self.clauses[clause_idx.0].to_string()
     }
 
     fn with_unit_clause(
@@ -278,6 +281,7 @@ impl<Config: ConfigT> State<Config> {
         clause_idx: ClauseIdx,
     ) -> UnitPropagationResult {
         debug!(
+            self.debug_writer,
             "found unit clause: {:?} in clause ({:?})",
             literal,
             self.clause_string(clause_idx)
@@ -333,13 +337,18 @@ impl<Config: ConfigT> State<Config> {
             == 1
     }
 
-    fn last_assigned_lit_in(&self, clause: &Clause<Config::BitSet>) -> Option<Literal> {
+    fn last_assigned_lit_in(
+        &self,
+        clause: &Clause<Config::BitSet>,
+        _seen: &Config::BitSet,
+    ) -> Option<Literal> {
         let mut last: Option<Literal> = None;
         for lit in clause.iter_literals() {
             let var = lit.variable();
             let idx = self.trail_entry_idx_by_var[var];
             let entry = &self.trail[idx];
             if entry.is_from_decision_point()
+                // || seen.contains(var)
                 || !clause.variables.contains(var)
                 || entry.decision_level != self.decision_level
             {
@@ -393,17 +402,27 @@ impl<Config: ConfigT> State<Config> {
                 negatives,
             }
         };
+        let mut seen = self.bitset_pool.acquire(|| Config::BitSet::create());
+        seen.clear_all();
         loop {
-            match self.last_assigned_lit_in(&learned) {
+            let lit = self.last_assigned_lit_in(&learned, &seen);
+            println!("See lit {:?}", lit);
+            match lit {
                 None => break,
                 Some(lit) => {
                     let entry = &self.trail[self.trail_entry_idx_by_var[lit.variable()]];
                     match entry.reason {
-                        Reason::Decision(_) => continue,
+                        Reason::Decision(_) => {
+                            seen.set(lit.variable());
+                            continue;
+                        }
                         Reason::ClauseIdx(clause_idx) => {
                             let resolve_with = &self.clauses[clause_idx];
                             match learned.can_resolve(&resolve_with, lit.variable()) {
-                                false => continue,
+                                false => {
+                                    seen.set(lit.variable());
+                                    continue;
+                                }
                                 true => {
                                     learned.resolve_exn(resolve_with, lit.variable());
 
@@ -417,7 +436,15 @@ impl<Config: ConfigT> State<Config> {
                 }
             }
         }
+        self.bitset_pool.release(seen);
         let backtrack_level = self.second_highest_decision_level(&learned);
+        debug!(
+            self.debug_writer,
+            "learned clause: {:?} from failed clause {:?}, backtrack level: {}",
+            learned.to_string(),
+            self.clause_string(failed_clause_idx),
+            backtrack_level
+        );
         (learned, backtrack_level)
     }
 
@@ -486,6 +513,10 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn react(&mut self, action: Action) -> StepResult {
+        debug!(
+            self.debug_writer,
+            "reacting to action: {:?} at decision level {}", action, self.decision_level
+        );
         match action {
             Action::Unsat => {
                 self.immediate_result = Some(SatResult::Unsat);
@@ -513,6 +544,7 @@ impl<Config: ConfigT> State<Config> {
             }
             Action::Contradiction(failed_idx) => {
                 let back = self.backtrack(ClauseIdx(failed_idx));
+
                 if !Config::USE_BACKTRACK_STATE {
                     StepResult::Continue
                 } else {
@@ -573,7 +605,11 @@ impl<Config: ConfigT> State<Config> {
         }
     }
 
-    pub fn new(formula: Formula<Config::BitSet>, mut bitset_pool: Pool<Config::BitSet>) -> Self {
+    pub fn new_with_pool_and_debug_writer<Writer: std::fmt::Write + 'static>(
+        formula: Formula<Config::BitSet>,
+        mut bitset_pool: Pool<Config::BitSet>,
+        debug_writer: Option<Writer>,
+    ) -> Self {
         let Formula {
             max_var,
             vars,
@@ -609,6 +645,13 @@ impl<Config: ConfigT> State<Config> {
         } else {
             None
         };
+        let debug_writer = match debug_writer {
+            None => None,
+            Some(w) => {
+                let b: Box<dyn std::fmt::Write> = Box::new(w);
+                Some(RefCell::new(b))
+            }
+        };
         let mut unsatisfied_clauses = Config::BitSet::create();
         unsatisfied_clauses.set_between(0, clauses.len());
         let all_variables = variables_bitset.clone();
@@ -631,17 +674,44 @@ impl<Config: ConfigT> State<Config> {
             bitset_pool,
             iterations: 0,
             rng,
+            debug_writer,
         }
     }
 
-    pub fn solve(formula: Vec<Vec<isize>>) -> SatResult {
-        let mut bitset_pool: Pool<Config::BitSet> = Pool::new();
+    pub fn new_with_debug_writer<Writer: std::fmt::Write + 'static>(
+        formula: Formula<Config::BitSet>,
+        debug_writer: Option<Writer>,
+    ) -> Self {
+        Self::new_with_pool_and_debug_writer(formula, Pool::new(), debug_writer)
+    }
+
+    pub fn new(formula: Formula<Config::BitSet>) -> Self {
+        Self::new_with_debug_writer::<String>(formula, None)
+    }
+
+    pub fn new_from_vec(formula: Vec<Vec<isize>>) -> Self {
+        Self::new_from_vec_with_debug_writer::<String>(formula, None)
+    }
+
+    pub fn new_from_vec_with_debug_writer<Writer: std::fmt::Write + 'static>(
+        formula: Vec<Vec<isize>>,
+        debug_writer: Option<Writer>,
+    ) -> Self {
+        let mut bitset_pool = Pool::new();
         let formula = Formula::new(formula, &mut bitset_pool);
-        // for clause in &formula.clauses {
-        //     println!("clause: {:?}", clause.variables.iter().collect::<Vec<_>>());
-        // }
-        let mut state = Self::new(formula, bitset_pool);
+        Self::new_with_pool_and_debug_writer(formula, bitset_pool, debug_writer)
+    }
+
+    pub fn solve_with_debug_writer<Writer: std::fmt::Write + 'static>(
+        formula: Vec<Vec<isize>>,
+        debug_writer: Option<Writer>,
+    ) -> SatResult {
+        let mut state = Self::new_from_vec_with_debug_writer(formula, debug_writer);
         state.run()
+    }
+
+    pub fn solve(formula: Vec<Vec<isize>>) -> SatResult {
+        Self::solve_with_debug_writer::<String>(formula, None)
     }
 }
 

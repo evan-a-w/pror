@@ -1,5 +1,7 @@
 use pror::cdcl::*;
 use pror::dimacs;
+use pror::sat::*;
+use pror::shared_string_writer::SharedStringWriter;
 
 #[cfg(test)]
 mod tests {
@@ -7,7 +9,7 @@ mod tests {
 
     use expect_test::expect;
 
-    use pror::cdcl::{Default};
+    use pror::cdcl::Default;
     use pror::sat::SatResult;
 
     #[test]
@@ -36,7 +38,6 @@ mod tests {
         let expect = expect!["Sat({})"];
         expect.assert_eq(&s);
     }
-
     #[test]
     fn trivial_unsatisfiable_due_to_empty_clause() {
         let formula = vec![vec![]];
@@ -96,6 +97,106 @@ mod tests {
         expect.assert_eq(&s);
     }
 
+    #[test]
+    fn thingo() {
+        use std::fmt::Write;
+        fn step_and_print<Writer: std::fmt::Write>(
+            mut s: Writer,
+            solver: &mut DefaultDebug,
+            literal_override: Option<Literal>,
+        ) {
+            let result = solver.step(literal_override);
+            writeln!(s, "\n{:?}", result);
+        }
+        let formula = vec![
+            vec![1, 2, 3],
+            vec![1, 2, -3],
+            vec![-2, 4],
+            vec![1, -2, -4],
+            vec![-1, 5, 6],
+            vec![-1, 5, -6],
+            vec![-5, -6],
+            vec![-1, -5, 6],
+        ];
+        let mut writer = SharedStringWriter::new();
+        let mut solver =
+            DefaultDebug::new_from_vec_with_debug_writer(formula, Some(writer.clone()));
+        step_and_print(&mut writer, &mut solver, Some(Literal::new(1, false)));
+        step_and_print(&mut writer, &mut solver, Some(Literal::new(2, false)));
+        step_and_print(&mut writer, &mut solver, Some(Literal::new(2, false)));
+        step_and_print(&mut writer, &mut solver, None);
+        step_and_print(&mut writer, &mut solver, None);
+        step_and_print(&mut writer, &mut solver, None);
+        step_and_print(&mut writer, &mut solver, Some(Literal::new(5, false)));
+        step_and_print(&mut writer, &mut solver, None);
+        step_and_print(&mut writer, &mut solver, None);
+        let expect = expect![[r#"
+            reacting to action: Continue(Literal { value: -1 }, true) at decision level 1
+            adding to trail at decision level 1: -1
+            satisfy_clauses: clauses satisfied by literal -1: -1 5 6, -1 5 -6, -1 -5 6
+
+            Continue
+            reacting to action: Continue(Literal { value: -2 }, true) at decision level 2
+            adding to trail at decision level 2: -2
+            satisfy_clauses: clauses satisfied by literal -2: -2 4, 1 -2 -4
+
+            Continue
+            found unit clause: Literal { value: 3 } in clause ("1 2 3")
+            would be contradiction with clause "1 2 -3" for literal 3
+            adding to trail at decision level 2: 3
+            satisfy_clauses: clauses satisfied by literal 3: 1 2 3
+            reacting to action: Contradiction(1) at decision level 2
+            learned clause: "1 2" from failed clause "1 2 -3", backtrack level: 1
+
+            Continue
+            found unit clause: Literal { value: 2 } in clause ("1 2")
+            adding to trail at decision level 1: 2
+            satisfy_clauses: clauses satisfied by literal 2: 1 2 3, 1 2 -3, -2 4, 1 -2 -4, 1 2
+            found unit clause: Literal { value: 4 } in clause ("-2 4")
+            would be contradiction with clause "1 -2 -4" for literal 4
+            adding to trail at decision level 1: 4
+            satisfy_clauses: clauses satisfied by literal 4: 1 2 3, -2 4
+            reacting to action: Contradiction(3) at decision level 1
+            learned clause: "1" from failed clause "1 -2 -4", backtrack level: 0
+
+            Continue
+            found unit clause: Literal { value: 1 } in clause ("1")
+            adding to trail at decision level 0: 1
+            satisfy_clauses: clauses satisfied by literal 1: 1 2 3, 1 2 -3, 1 -2 -4, -1 5 6, -1 5 -6, -1 -5 6, 1 2, 1
+
+            Continue
+            reacting to action: Continue(Literal { value: 3 }, true) at decision level 1
+            adding to trail at decision level 1: 3
+            satisfy_clauses: clauses satisfied by literal 3: 1 2 3, 1 2 -3, -2 4, 1 -2 -4, 1 2
+
+            Continue
+            reacting to action: Continue(Literal { value: -5 }, true) at decision level 2
+            adding to trail at decision level 2: -5
+            satisfy_clauses: clauses satisfied by literal -5: 1 2 3, -2 4, -5 -6, -1 -5 6
+
+            Continue
+            found unit clause: Literal { value: 6 } in clause ("-1 5 6")
+            would be contradiction with clause "-1 5 -6" for literal 6
+            adding to trail at decision level 2: 6
+            satisfy_clauses: clauses satisfied by literal 6: -1 5 6
+            reacting to action: Contradiction(5) at decision level 2
+            learned clause: "-1 5" from failed clause "-1 5 -6", backtrack level: 0
+
+            Continue
+            found unit clause: Literal { value: 2 } in clause ("1 2")
+            adding to trail at decision level 0: 2
+            satisfy_clauses: clauses satisfied by literal 2: 1 2 3, 1 2 -3, -2 4, 1 -2 -4, 1 2
+            found unit clause: Literal { value: 4 } in clause ("-2 4")
+            would be contradiction with clause "1 -2 -4" for literal 4
+            adding to trail at decision level 0: 4
+            satisfy_clauses: clauses satisfied by literal 4: 1 2 3, -2 4, -5 -6, -1 -5 6
+            reacting to action: Contradiction(3) at decision level 0
+
+            Done(Unsat)
+        "#]];
+        expect.assert_eq(writer.borrow().as_ref());
+    }
+
     // #[test]
     // fn sudoku_dnf() {
     //     let formula = dimacs::read_string(dimacs::SUDOKU);
@@ -105,13 +206,12 @@ mod tests {
     //     expect.assert_eq(&s);
     // }
 
-
     // #[test]
     // fn succ_dnf() {
     //     let formula = dimacs::read_string(dimacs::SUCC_EG);
     //     let result = Default::solve(formula);
     //     let s = format!("{:?}", result);
-    //     let expect = expect!["Sat({1: true, 2: false, 3: false, 4: true, 5: true, 6: true, 7: true, 8: true, 9: true, 10: true, 11: true, 12: true, 13: true, 14: true, 15: true, 16: true, 17: true, 18: true, 19: true, 20: true, 21: true, 22: true, 23: true, 24: true, 25: true, 26: true, 27: true, 28: true, 29: true, 30: true, 31: true, 32: true, 33: true, 34: true, 35: true, 36: true, 37: true, 38: true, 39: true, 40: true, 41: true, 42: true, 43: true, 44: true, 45: true, 46: true, 47: true, 48: true, 49: true, 50: true, 51: true, 52: true, 53: true, 54: true, 55: true, 56: true, 57: true, 58: true, 59: true, 60: true, 61: true, 62: true, 63: true, 64: true, 65: true, 66: true, 67: true, 68: true, 69: true, 70: true, 71: true, 72: true, 73: true, 74: true, 75: true, 76: true, 77: true, 78: true, 79: true, 80: true, 81: true, 82: true, 83: true, 84: true, 85: true, 86: true, 87: true, 88: true, 89: true, 90: true, 91: true, 92: true, 93: true, 94: true, 95: true, 96: true, 97: true, 98: true, 99: true, 100: true, 101: true, 102: true, 103: true, 104: true, 105: true, 106: true, 107: true, 108: true, 109: true, 110: true, 111: true, 112: true, 113: true, 114: true, 115: true, 116: true, 117: true, 118: true, 119: true, 120: true, 121: true, 122: true, 123: true, 124: true, 125: true, 126: true, 127: true, 128: true, 129: true, 130: true, 131: true, 132: true, 133: true, 134: true, 135: true, 136: true, 137: true, 138: true, 139: true, 140: true})"];
+    //     let expect = expect!["Sat({1: false, 2: true, 3: false, 4: false, 5: false, 6: true, 7: false, 8: false, 9: false, 10: true, 11: false, 12: false, 13: true, 14: false, 15: false, 16: false, 17: false, 18: false, 19: false, 20: false, 21: true, 22: false, 23: false, 24: true, 25: false, 26: false, 27: false, 28: true, 29: false, 30: false, 31: false, 32: true, 33: false, 34: false, 35: false, 36: true, 37: true, 38: false, 39: false, 40: false, 41: false, 42: false, 43: true, 44: false, 45: false, 46: false, 47: true, 48: false, 49: false, 50: false, 51: true, 52: false, 53: false, 54: false, 55: false, 56: true, 57: false, 58: false, 59: false, 60: true, 61: false, 62: false, 63: false, 64: false, 65: false, 66: false, 67: false, 68: true, 69: false, 70: false, 71: true, 72: false, 73: false, 74: false, 75: true, 76: false, 77: true, 78: false, 79: false, 80: false, 81: false, 82: true, 83: false, 84: false, 85: false, 86: true, 87: false, 88: true, 89: false, 90: false, 91: false, 92: false, 93: false, 94: true, 95: false, 96: false, 97: false, 98: false, 99: false, 100: false, 101: true, 102: false, 103: false, 104: true, 105: false, 106: true, 107: true, 108: false, 109: true, 110: true, 111: false, 112: true, 113: true, 114: false, 115: true, 116: true, 117: true, 118: true, 119: false, 120: true, 121: true, 122: true, 123: false, 124: true, 125: true, 126: false, 127: false, 128: true, 129: true, 130: true, 131: true, 132: false, 133: true, 134: true, 135: true, 136: false, 137: true, 138: false, 139: true, 140: true})"];
     //     expect.assert_eq(&s);
     // }
 

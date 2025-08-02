@@ -1,7 +1,7 @@
 use crate::bitset::BitSetT;
 use crate::pool::Pool;
-use std::collections::{BTreeMap, HashMap};
 use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug)]
 pub enum SatResult {
@@ -9,18 +9,21 @@ pub enum SatResult {
     Unsat,
 }
 
+#[derive(Debug)]
 pub enum StepResult {
     Done(SatResult),
     Continue,
 }
-
 
 pub struct Clause<BitSet: BitSetT> {
     pub variables: BitSet,
     pub negatives: BitSet,
 }
 
-pub fn satisfies<BitSet: BitSetT>(clauses: &Vec<Clause<BitSet>>, assignments: &BTreeMap<usize, bool>) -> bool {
+pub fn satisfies<BitSet: BitSetT>(
+    clauses: &Vec<Clause<BitSet>>,
+    assignments: &BTreeMap<usize, bool>,
+) -> bool {
     clauses.iter().all(|clause| {
         clause.iter_literals().any(|literal| {
             if let Some(&value) = assignments.get(&literal.variable()) {
@@ -40,10 +43,17 @@ impl<BitSet: BitSetT> Clause<BitSet> {
         }
     }
 
+    pub fn to_string(&self) -> String {
+        self.iter_literals()
+            .map(|lit| lit.to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     pub fn can_resolve(&self, other: &Self, on_var: usize) -> bool {
         self.variables.contains(on_var)
-            && other.negatives.contains(on_var)
-            && !(self.negatives.contains(on_var) != other.negatives.contains(on_var))
+            && other.variables.contains(on_var)
+            && (self.negatives.contains(on_var) != other.negatives.contains(on_var))
     }
 
     pub fn resolve_exn(&mut self, other: &Self, on_var: usize) {
