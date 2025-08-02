@@ -4,9 +4,10 @@ use crate::pool::Pool;
 use crate::sat::*;
 use itertools::Either;
 use rand::prelude::*;
+use rand_pcg::Pcg64;
 use std::collections::BTreeMap;
 
-trait ConfigT: Sized {
+pub trait ConfigT: Sized {
     type BitSet: BitSetT + Clone;
 
     fn choose_variable(state: &mut State<Self>) -> Option<usize>;
@@ -61,7 +62,7 @@ pub struct State<Config: ConfigT> {
     next_literal: Option<Literal>,
     bitset_pool: Pool<Config::BitSet>,
     iterations: usize,
-    rng: rand::rngs::ThreadRng,
+    rng: Pcg64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -126,6 +127,21 @@ impl<Config: ConfigT> State<Config> {
     fn first_unit_clause(&self) -> Option<(Literal, ClauseIdx)> {
         self.unsatisfied_clauses.iter().find_map(|clause_idx| {
             let clause = &self.clauses[clause_idx];
+            debug!(
+                "checking clause {:?} for unit literal, unset vars: {}",
+                self.clause_string(ClauseIdx(clause_idx)),
+                {
+                    let clause = &self.clauses[clause_idx];
+                    clause
+                        .variables
+                        .iter_intersection(&self.unassigned_variables)
+                        .map(|variable| {
+                            Literal::new(variable, !clause.negatives.contains(variable)).to_string()
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                }
+            );
             self.try_get_unit_literal(clause)
                 .map(|literal| (literal, ClauseIdx(clause_idx)))
         })
@@ -148,15 +164,19 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn would_be_contradiction(&self, literal: Literal) -> Option<ClauseIdx> {
-        self.clauses(literal)
-            .iter()
-            .flat_map(|clauses| clauses.iter())
+        self.clauses(literal)?
+            .iter_intersection(&self.unsatisfied_clauses)
             .find_map(|clause_idx| {
                 let clause = &self.clauses[clause_idx];
                 let literal_in_unit = self.try_get_unit_literal(clause)?;
                 if literal_in_unit.variable() == literal.variable()
                     && literal_in_unit.value() != literal.value()
                 {
+                    debug!(
+                        "would be contradiction with clause {:?} for literal {}",
+                        self.clause_string(ClauseIdx(clause_idx)),
+                        literal.to_string()
+                    );
                     Some(ClauseIdx(clause_idx))
                 } else {
                     None
@@ -182,12 +202,10 @@ impl<Config: ConfigT> State<Config> {
         let literal = trail_entry.literal;
         let var = literal.variable();
         let mut scratch_clause_bitset = std::mem::take(&mut self.scratch_clause_bitset).unwrap();
+        scratch_clause_bitset.clear_all();
         let clauses = self.clauses(literal);
         match clauses {
-            None => {
-                scratch_clause_bitset.clear_all();
-                scratch_clause_bitset.union_with(&self.unsatisfied_clauses);
-            }
+            None => (),
             Some(clauses) => scratch_clause_bitset.intersect(clauses, &self.unsatisfied_clauses),
         }
         let mut newly_set = self.bitset_pool.acquire(|| Config::BitSet::create());
@@ -200,13 +218,23 @@ impl<Config: ConfigT> State<Config> {
             }
         }
         self.scratch_clause_bitset = Some(scratch_clause_bitset);
+        debug!(
+            "satisfy_clauses: clauses satisfied by literal {}: {}",
+            literal.to_string(),
+            newly_set
+                .iter()
+                .map(|idx| self.clause_string(ClauseIdx(idx)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         newly_set
     }
 
     fn add_to_trail(&mut self, mut trail_entry: TrailEntry<Config::BitSet>) {
         debug!(
-            "adding to trail at decision level {}: {:?}",
-            trail_entry.decision_level, trail_entry.literal
+            "adding to trail at decision level {}: {}",
+            trail_entry.decision_level,
+            trail_entry.literal.to_string()
         );
         let literal = trail_entry.literal;
         let var = literal.variable();
@@ -235,14 +263,24 @@ impl<Config: ConfigT> State<Config> {
         }
     }
 
+    fn clause_string(&self, clause_idx: ClauseIdx) -> String {
+        let clause = &self.clauses[clause_idx.0];
+        clause
+            .iter_literals()
+            .map(|lit| lit.to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     fn with_unit_clause(
         &mut self,
         literal: Literal,
         clause_idx: ClauseIdx,
     ) -> UnitPropagationResult {
         debug!(
-            "found unit clause: {:?} in clause idx: {:?}",
-            literal, clause_idx.0
+            "found unit clause: {:?} in clause ({:?})",
+            literal,
+            self.clause_string(clause_idx)
         );
         let decision_level = self.decision_level;
         let trail_entry = TrailEntry {
@@ -455,15 +493,20 @@ impl<Config: ConfigT> State<Config> {
             }
             Action::FinishedUnitPropagation => StepResult::Continue,
             Action::Continue(literal, continue_flag) => {
-                let entry = TrailEntry {
+                let trail_entry = TrailEntry {
                     literal,
                     decision_level: self.decision_level,
                     reason: Reason::Decision(literal),
                     satisfied_clauses: None,
                     continue_: continue_flag,
                 };
-                self.add_to_trail(entry);
-                StepResult::Continue
+                let conf = self.would_be_contradiction(literal);
+                self.add_to_trail(trail_entry);
+                if let Some(conflict) = conf {
+                    self.react(Action::Contradiction(conflict.0))
+                } else {
+                    StepResult::Continue
+                }
             }
             Action::Contradiction(_) if self.decision_level == 0 => {
                 StepResult::Done(SatResult::Unsat)
@@ -520,7 +563,11 @@ impl<Config: ConfigT> State<Config> {
     pub fn run(&mut self) -> SatResult {
         loop {
             match self.step(None) {
-                StepResult::Done(res) => return res,
+                StepResult::Done(SatResult::Unsat) => return SatResult::Unsat,
+                StepResult::Done(SatResult::Sat(res)) => {
+                    assert!(satisfies(&self.clauses, &res));
+                    return SatResult::Sat(res);
+                }
                 StepResult::Continue => continue,
             }
         }
@@ -566,7 +613,7 @@ impl<Config: ConfigT> State<Config> {
         unsatisfied_clauses.set_between(0, clauses.len());
         let all_variables = variables_bitset.clone();
         let unassigned_variables = variables_bitset;
-        let rng = rand::rng();
+        let rng = Pcg64::seed_from_u64(1);
         State {
             immediate_result,
             all_variables,
@@ -601,6 +648,7 @@ impl<Config: ConfigT> State<Config> {
 pub struct FirstSetConfig {}
 pub struct RandomConfig {}
 pub struct FirstSetConfigDebug {}
+pub struct RandomConfigDebug {}
 
 impl ConfigT for FirstSetConfig {
     type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
@@ -610,27 +658,7 @@ impl ConfigT for FirstSetConfig {
     }
 
     const DEBUG: bool = false;
-    const USE_BACKTRACK_STATE: bool = false;
-}
-
-impl ConfigT for RandomConfig {
-    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
-
-    fn choose_variable(state: &mut State<Self>) -> Option<usize> {
-        let len = state.unassigned_variables.count();
-        if len == 0 {
-            None
-        } else {
-            let num = state.rng.gen_range(0..len);
-            match state.unassigned_variables.nth(num) {
-                Some(var) => Some(var),
-                None => panic!("unassigned_variables should have been non-empty, but was empty"),
-            }
-        }
-    }
-
-    const DEBUG: bool = false;
-    const USE_BACKTRACK_STATE: bool = false;
+    const USE_BACKTRACK_STATE: bool = true;
 }
 
 impl ConfigT for FirstSetConfigDebug {
@@ -641,8 +669,43 @@ impl ConfigT for FirstSetConfigDebug {
     }
 
     const DEBUG: bool = true;
+    const USE_BACKTRACK_STATE: bool = true;
+}
+
+fn choose_random_variable<T: ConfigT>(state: &mut State<T>) -> Option<usize> {
+    let len = state.unassigned_variables.count();
+    if len == 0 {
+        None
+    } else {
+        let num = state.rng.random_range(0..len);
+        match state.unassigned_variables.nth(num) {
+            Some(var) => Some(var),
+            None => panic!("unassigned_variables should have been non-empty, but was empty"),
+        }
+    }
+}
+
+impl ConfigT for RandomConfig {
+    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
+
+    fn choose_variable(state: &mut State<Self>) -> Option<usize> {
+        choose_random_variable(state)
+    }
+
+    const DEBUG: bool = false;
+    const USE_BACKTRACK_STATE: bool = false;
+}
+
+impl ConfigT for RandomConfigDebug {
+    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
+
+    fn choose_variable(state: &mut State<Self>) -> Option<usize> {
+        choose_random_variable(state)
+    }
+
+    const DEBUG: bool = true;
     const USE_BACKTRACK_STATE: bool = false;
 }
 
 pub type Default = State<RandomConfig>;
-pub type DefaultDebug = State<FirstSetConfigDebug>;
+pub type DefaultDebug = State<RandomConfigDebug>;

@@ -277,7 +277,7 @@ where
         }
         for bl in 0..aset.storage.block_count().min(bset.storage.block_count()) {
             let me = self.storage.block_mut(bl);
-            let a = bset.storage.block(bl);
+            let a = aset.storage.block(bl);
             let b = bset.storage.block(bl);
             for ((m, &bb), &aa) in me.iter_mut().zip(a.iter()).zip(b.iter()) {
                 *m = bb & aa;

@@ -14,9 +14,22 @@ pub enum StepResult {
     Continue,
 }
 
+
 pub struct Clause<BitSet: BitSetT> {
     pub variables: BitSet,
     pub negatives: BitSet,
+}
+
+pub fn satisfies<BitSet: BitSetT>(clauses: &Vec<Clause<BitSet>>, assignments: &BTreeMap<usize, bool>) -> bool {
+    clauses.iter().all(|clause| {
+        clause.iter_literals().any(|literal| {
+            if let Some(&value) = assignments.get(&literal.variable()) {
+                value == literal.value()
+            } else {
+                false
+            }
+        })
+    })
 }
 
 impl<BitSet: BitSetT> Clause<BitSet> {
@@ -60,6 +73,14 @@ impl Literal {
     pub fn new(var: usize, value: bool) -> Self {
         Literal {
             value: if value { var as isize } else { -(var as isize) },
+        }
+    }
+
+    pub fn to_string(&self) -> String {
+        if self.value > 0 {
+            format!("{}", self.value)
+        } else {
+            format!("-{}", -self.value)
         }
     }
 
