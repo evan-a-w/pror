@@ -1,4 +1,4 @@
-use crate::bitset::BitSetT;
+use crate::bitset::{BTreeBitSet, BitSetT};
 use crate::fixed_bitset;
 use crate::pool::Pool;
 use crate::sat::*;
@@ -540,6 +540,12 @@ impl<Config: ConfigT> State<Config> {
         };
         let mut unsatisfied_clauses = Config::BitSet::create();
         unsatisfied_clauses.set_between(0, clauses.len());
+        for (idx, clause) in clauses.iter().enumerate() {
+            if clause.tautology {
+                unsatisfied_clauses.clear(idx);
+            }
+        }
+
         let all_variables = variables_bitset.clone();
         let unassigned_variables = variables_bitset;
         let rng = Pcg64::seed_from_u64(5);
@@ -631,7 +637,8 @@ impl ConfigT for RandomConfig {
 }
 
 impl ConfigT for RandomConfigDebug {
-    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
+    // type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
+    type BitSet = BTreeBitSet;
 
     fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
         choose_random_literal(state)

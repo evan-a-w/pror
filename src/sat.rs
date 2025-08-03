@@ -18,6 +18,7 @@ pub enum StepResult {
 pub struct Clause<BitSet: BitSetT> {
     pub variables: BitSet,
     pub negatives: BitSet,
+    pub tautology: bool,
 }
 
 pub fn satisfies<BitSet: BitSetT>(
@@ -40,6 +41,7 @@ impl<BitSet: BitSetT> Clause<BitSet> {
         Clause {
             variables,
             negatives,
+            tautology: false,
         }
     }
 
@@ -61,6 +63,7 @@ impl<BitSet: BitSetT> Clause<BitSet> {
         Clause {
             variables,
             negatives,
+            tautology: self.tautology,
         }
     }
 
@@ -138,6 +141,7 @@ impl<BitSet: BitSetT> Formula<BitSet> {
         for clause in formula {
             let mut variables = bitset_pool.acquire(|| BitSet::create());
             let mut negatives = bitset_pool.acquire(|| BitSet::create());
+            let mut tautology = false;
             variables.clear_all();
             negatives.clear_all();
 
@@ -146,8 +150,8 @@ impl<BitSet: BitSetT> Formula<BitSet> {
                     panic!("Can't have 0 vars");
                 }
                 let var = lit.abs() as usize;
-                if variables.contains(var) {
-                    panic!("Variable {} appears multiple times in clause", var);
+                if variables.contains(var) && !negatives.contains(var) != (lit < 0) {
+                    tautology = true;
                 }
                 variables.set(var);
                 if lit < 0 {
@@ -163,6 +167,7 @@ impl<BitSet: BitSetT> Formula<BitSet> {
             clauses.push(Clause {
                 variables,
                 negatives,
+                tautology,
             });
         }
 

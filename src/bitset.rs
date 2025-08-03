@@ -135,6 +135,7 @@ pub trait BitSetT {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct BTreeBitSet {
     set: std::collections::BTreeSet<usize>,
 }

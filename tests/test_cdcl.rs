@@ -146,8 +146,6 @@ mod tests {
             adding to trail at decision level 2: 3
             satisfy_clauses: clauses satisfied by literal 3: (1 2 3)
             reacting to action: Contradiction(1) at decision level 2
-            Resolving learned (1 2 -3) with (1 2 3) on 3
-            learned clause: "(1 2)" from failed clause "(1 2 -3)", backtrack level: 1
             undoing trail entry: 3 at decision level 2
             undoing trail entry: -2 at decision level 2
 
@@ -160,9 +158,6 @@ mod tests {
             adding to trail at decision level 1: 4
             satisfy_clauses: clauses satisfied by literal 4: (1 2 3), (-2 4)
             reacting to action: Contradiction(3) at decision level 1
-            Resolving learned (1 -2 -4) with (-2 4) on 4
-            Resolving learned (1 -2) with (1 2) on 2
-            learned clause: "(1)" from failed clause "(1 -2 -4)", backtrack level: 0
             undoing trail entry: 4 at decision level 1
             undoing trail entry: 2 at decision level 1
             undoing trail entry: -1 at decision level 1
@@ -173,40 +168,34 @@ mod tests {
             satisfy_clauses: clauses satisfied by literal 1: (1 2 3), (1 2 -3), (1 -2 -4), (-1 5 6), (-1 5 -6), (-1 -5 6), (1 2), (1)
 
             Continue
-            reacting to action: Continue(Literal { value: 6 }, true) at decision level 1
-            adding to trail at decision level 1: 6
-            satisfy_clauses: clauses satisfied by literal 6: (1 2 3), (1 2 -3), (-2 4), (1 -2 -4), (-1 5 6), (-1 -5 6), (1 2)
+            reacting to action: Continue(Literal { value: 3 }, true) at decision level 1
+            adding to trail at decision level 1: 3
+            satisfy_clauses: clauses satisfied by literal 3: (1 2 3), (1 2 -3), (-2 4), (1 -2 -4), (1 2)
 
             Continue
-            found unit clause: Literal { value: 5 } in clause ("(-1 5 -6)")
-            would be contradiction with clause "(-5 -6)" for literal 5
-            adding to trail at decision level 1: 5
-            satisfy_clauses: clauses satisfied by literal 5: (1 2 3), (-2 4), (-1 5 -6)
-            reacting to action: Contradiction(6) at decision level 1
-            Resolving learned (-5 -6) with (-1 5 -6) on 5
-            learned clause: "(-1 -6)" from failed clause "(-5 -6)", backtrack level: 0
-            undoing trail entry: 5 at decision level 1
-            undoing trail entry: 6 at decision level 1
+            reacting to action: Continue(Literal { value: -5 }, true) at decision level 2
+            adding to trail at decision level 2: -5
+            satisfy_clauses: clauses satisfied by literal -5: (1 2 3), (-2 4), (-5 -6), (-1 -5 6)
+
+            Continue
+            found unit clause: Literal { value: 6 } in clause ("(-1 5 6)")
+            would be contradiction with clause "(-1 5 -6)" for literal 6
+            adding to trail at decision level 2: 6
+            satisfy_clauses: clauses satisfied by literal 6: (-1 5 6)
+            reacting to action: Contradiction(5) at decision level 2
+            undoing trail entry: 6 at decision level 2
+            undoing trail entry: -5 at decision level 2
+            undoing trail entry: 3 at decision level 1
 
             Continue
             found unit clause: Literal { value: 2 } in clause ("(1 2)")
             adding to trail at decision level 0: 2
-            satisfy_clauses: clauses satisfied by literal 2: (1 2 3), (1 2 -3), (-2 4), (1 -2 -4), (-1 5 6), (-1 -5 6), (1 2)
+            satisfy_clauses: clauses satisfied by literal 2: (1 2 3), (1 2 -3), (-2 4), (1 -2 -4), (1 2)
             found unit clause: Literal { value: 4 } in clause ("(-2 4)")
             would be contradiction with clause "(1 -2 -4)" for literal 4
             adding to trail at decision level 0: 4
-            satisfy_clauses: clauses satisfied by literal 4: (1 2 3), (-2 4), (-1 5 -6)
+            satisfy_clauses: clauses satisfied by literal 4: (1 2 3), (-2 4), (-5 -6), (-1 -5 6)
             reacting to action: Contradiction(3) at decision level 0
-
-            Done(Unsat)
-            found unit clause: Literal { value: -6 } in clause ("(-1 -6)")
-            adding to trail at decision level 0: -6
-            satisfy_clauses: clauses satisfied by literal -6: (-1 5 -6), (-5 -6), (-1 -6)
-            found unit clause: Literal { value: 5 } in clause ("(-1 5 6)")
-            would be contradiction with clause "(-1 -5 6)" for literal 5
-            adding to trail at decision level 0: 5
-            satisfy_clauses: clauses satisfied by literal 5: (-1 5 6)
-            reacting to action: Contradiction(7) at decision level 0
 
             Done(Unsat)
         "#]];
@@ -236,23 +225,23 @@ mod tests {
         let res = DefaultDebug::solve_with_debug_writer(formula, Some(writer.clone()));
         writeln!(writer, "{:?}", res);
         let expect = expect![[r#"
-            reacting to action: Continue(Literal { value: 1 }, true) at decision level 1
-            adding to trail at decision level 1: 1
-            satisfy_clauses: clauses satisfied by literal 1: (1 4 -5 -6), (1 2 3 -4 5 6), (1 2 3 -4 -5 -6)
-            reacting to action: Continue(Literal { value: -3 }, true) at decision level 2
-            adding to trail at decision level 2: -3
+            reacting to action: Continue(Literal { value: -3 }, true) at decision level 1
+            adding to trail at decision level 1: -3
             satisfy_clauses: clauses satisfied by literal -3: (-2 -3 -4 -5 6), (-1 -2 -3 4 -5 6), (-3 -4 5 -6), (-1 2 -3 -4 5 6), (-2 -3 4 5)
-            found unit clause: Literal { value: 2 } in clause ("(-1 2 3)")
-            adding to trail at decision level 2: 2
-            satisfy_clauses: clauses satisfied by literal 2: (-1 2 3)
-            found unit clause: Literal { value: -6 } in clause ("(-2 -6)")
+            reacting to action: Continue(Literal { value: -6 }, true) at decision level 2
             adding to trail at decision level 2: -6
-            satisfy_clauses: clauses satisfied by literal -6: (-2 3 4 -6), (-1 -2 3 -4 -5 -6), (-2 -6)
+            satisfy_clauses: clauses satisfied by literal -6: (1 4 -5 -6), (-2 3 4 -6), (-1 -2 3 -4 -5 -6), (-2 -6), (1 2 3 -4 -5 -6)
             found unit clause: Literal { value: -5 } in clause ("(3 -5 6)")
             adding to trail at decision level 2: -5
             satisfy_clauses: clauses satisfied by literal -5: (3 -5 6)
+            reacting to action: Continue(Literal { value: 1 }, true) at decision level 3
+            adding to trail at decision level 3: 1
+            satisfy_clauses: clauses satisfied by literal 1: (1 2 3 -4 5 6)
+            found unit clause: Literal { value: 2 } in clause ("(-1 2 3)")
+            adding to trail at decision level 3: 2
+            satisfy_clauses: clauses satisfied by literal 2: (-1 2 3)
             found unit clause: Literal { value: 4 } in clause ("(-1 -2 4 5)")
-            adding to trail at decision level 2: 4
+            adding to trail at decision level 3: 4
             satisfy_clauses: clauses satisfied by literal 4: (-1 -2 4 5)
             Sat({1: true, 2: true, 3: false, 4: true, 5: false, 6: false})
         "#]];
@@ -369,34 +358,34 @@ mod tests {
             found unit clause: Literal { value: 15 } in clause ("(13 15)")
             adding to trail at decision level 0: 15
             satisfy_clauses: clauses satisfied by literal 15: (6 -7 -12 15), (13 15), (3 -5 6 7 -9 -14 15)
-            reacting to action: Continue(Literal { value: 2 }, true) at decision level 1
-            adding to trail at decision level 1: 2
-            satisfy_clauses: clauses satisfied by literal 2: (2 -6 8 12), (2 3 -9 -11 -12), (1 2 -4 5 6 -7 8 -9 10 11 12 13 14 -15), (-1 2 3 6 -7 8 10 11)
-            reacting to action: Continue(Literal { value: -6 }, true) at decision level 2
-            adding to trail at decision level 2: -6
-            satisfy_clauses: clauses satisfied by literal -6: (-5 -6 13 -14), (-2 -5 -6 7 8 -9 10 12 -15), (-1 -6 11)
-            reacting to action: Continue(Literal { value: 14 }, true) at decision level 3
-            adding to trail at decision level 3: 14
-            satisfy_clauses: clauses satisfied by literal 14: (11 14), (-5 6 12 14), (-2 7 8 -12 14), (-2 -5 -8 -9 10 -11 14)
-            reacting to action: Continue(Literal { value: 12 }, true) at decision level 4
-            adding to trail at decision level 4: 12
-            satisfy_clauses: clauses satisfied by literal 12: (3 5 8 10 -11 12 13 -14), (1 -2 3 -7 -11 12 -14 -15), (-2 3 6 8 10 12 -14 -15)
-            reacting to action: Continue(Literal { value: -1 }, true) at decision level 5
-            adding to trail at decision level 5: -1
-            satisfy_clauses: clauses satisfied by literal -1: (-1 -4 11 13), (-1 3 -5 -12), (-1 -5 -7 8 -11 -14)
-            reacting to action: Continue(Literal { value: -8 }, true) at decision level 6
-            adding to trail at decision level 6: -8
-            satisfy_clauses: clauses satisfied by literal -8: (-2 -4 -5 7 -8)
-            reacting to action: Continue(Literal { value: 5 }, true) at decision level 7
-            adding to trail at decision level 7: 5
-            satisfy_clauses: clauses satisfied by literal 5: 
-            reacting to action: Continue(Literal { value: 7 }, true) at decision level 8
-            adding to trail at decision level 8: 7
-            satisfy_clauses: clauses satisfied by literal 7: (1 -2 3 -4 -5 6 7 8 -11 -15)
-            reacting to action: Continue(Literal { value: -11 }, true) at decision level 9
-            adding to trail at decision level 9: -11
-            satisfy_clauses: clauses satisfied by literal -11: 
-            Sat({1: false, 2: true, 3: false, 4: true, 5: true, 6: false, 7: true, 8: false, 9: true, 10: false, 11: false, 12: true, 13: false, 14: true, 15: true})
+            reacting to action: Continue(Literal { value: -7 }, true) at decision level 1
+            adding to trail at decision level 1: -7
+            satisfy_clauses: clauses satisfied by literal -7: (1 -2 3 -7 -11 12 -14 -15), (1 2 -4 5 6 -7 8 -9 10 11 12 13 14 -15), (-1 2 3 6 -7 8 10 11), (-1 -5 -7 8 -11 -14)
+            reacting to action: Continue(Literal { value: -14 }, true) at decision level 2
+            adding to trail at decision level 2: -14
+            satisfy_clauses: clauses satisfied by literal -14: (3 5 8 10 -11 12 13 -14), (-5 -6 13 -14), (-2 3 6 8 10 12 -14 -15)
+            found unit clause: Literal { value: 11 } in clause ("(11 14)")
+            adding to trail at decision level 2: 11
+            satisfy_clauses: clauses satisfied by literal 11: (11 14), (-1 -4 11 13), (-1 -6 11)
+            reacting to action: Continue(Literal { value: 2 }, true) at decision level 3
+            adding to trail at decision level 3: 2
+            satisfy_clauses: clauses satisfied by literal 2: (2 -6 8 12), (2 3 -9 -11 -12)
+            reacting to action: Continue(Literal { value: 6 }, true) at decision level 4
+            adding to trail at decision level 4: 6
+            satisfy_clauses: clauses satisfied by literal 6: (-5 6 12 14), (1 -2 3 -4 -5 6 7 8 -11 -15)
+            reacting to action: Continue(Literal { value: -5 }, true) at decision level 5
+            adding to trail at decision level 5: -5
+            satisfy_clauses: clauses satisfied by literal -5: (-2 -4 -5 7 -8), (-2 -5 -6 7 8 -9 10 12 -15), (-1 3 -5 -12), (-2 -5 -8 -9 10 -11 14)
+            reacting to action: Continue(Literal { value: 8 }, true) at decision level 6
+            adding to trail at decision level 6: 8
+            satisfy_clauses: clauses satisfied by literal 8: (-2 7 8 -12 14)
+            reacting to action: Continue(Literal { value: 12 }, true) at decision level 7
+            adding to trail at decision level 7: 12
+            satisfy_clauses: clauses satisfied by literal 12: 
+            reacting to action: Continue(Literal { value: 1 }, true) at decision level 8
+            adding to trail at decision level 8: 1
+            satisfy_clauses: clauses satisfied by literal 1: 
+            Sat({1: true, 2: true, 3: false, 4: true, 5: false, 6: true, 7: false, 8: true, 9: true, 10: false, 11: true, 12: true, 13: false, 14: false, 15: true})
         "#]];
         expect.assert_eq(writer.borrow().as_ref());
     }

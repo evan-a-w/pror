@@ -147,6 +147,17 @@ fn apply<BitSet: BitSetT>(bs: &mut BitSet, op: &BitSetOp) -> UnaryRes {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct BoundedVec<const N: usize>(Vec<usize>);
+
+impl<const N: usize> Arbitrary for BoundedVec<N> {
+    fn arbitrary(g: &mut Gen) -> Self {
+        let len = usize::arbitrary(g) % N;
+        let vec = (0..len).map(|_| usize::arbitrary(g) % (1 << 16)).collect();
+        BoundedVec(vec)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum BinaryRes {
     List(Vec<usize>),
     Unary(UnaryRes),
@@ -192,13 +203,26 @@ fn apply2<BitSet: BitSetT>(bs1: &mut BitSet, bs2: &mut BitSet, op: &PairBitSetOp
 }
 
 #[quickcheck]
-fn prop_bitset_matches_naive(initial_state: Vec<usize>, ops: Ops) -> TestResult {
+fn prop_bitset_matches_naive(initial_state: BoundedVec<1024>, ops: Ops) -> TestResult {
     let mut b = BS1::create();
-    initial_state.iter().for_each(|&i| b.set(i));
     let mut naive = BTreeBitSet::create();
+    initial_state.0.iter().for_each(|&i| {
+        b.set(i);
+        naive.set(i);
+    });
 
     for op in &ops.ops {
-        if apply(&mut b, op) != apply(&mut naive, op) {
+        let res = apply(&mut b, op);
+        let res_naive = apply(&mut naive, op);
+        if res != res_naive {
+            println!(
+                "Failed on op: {:?}\ngood: {:?} ({:?})\nnaive: {:?} ({:?})",
+                op,
+                res,
+                b.iter().collect::<Vec<usize>>(),
+                res_naive,
+                naive.iter().collect::<Vec<usize>>()
+            );
             return TestResult::failed();
         }
     }
@@ -208,8 +232,8 @@ fn prop_bitset_matches_naive(initial_state: Vec<usize>, ops: Ops) -> TestResult 
 
 #[quickcheck]
 fn prop_bitset_matches_naive2(
-    initial_state_a: Vec<usize>,
-    initial_state_b: Vec<usize>,
+    initial_state_a: BoundedVec<1024>,
+    initial_state_b: BoundedVec<1024>,
     ops: BinOps,
 ) -> TestResult {
     let mut a = BS1::create();
@@ -217,11 +241,11 @@ fn prop_bitset_matches_naive2(
     let mut naive_a = BTreeBitSet::create();
     let mut naive_b = BTreeBitSet::create();
 
-    initial_state_a.iter().for_each(|&i| {
+    initial_state_a.0.iter().for_each(|&i| {
         a.set(i);
         naive_a.set(i)
     });
-    initial_state_b.iter().for_each(|&i| {
+    initial_state_b.0.iter().for_each(|&i| {
         b.set(i);
         naive_b.set(i)
     });
@@ -241,6 +265,90 @@ fn prop_bitset_matches_naive2(
             );
             return TestResult::failed();
         }
+    }
+
+    TestResult::passed()
+}
+
+#[quickcheck]
+fn intersect_first_set_ge(
+    initial_state_a: BoundedVec<1024>,
+    initial_state_b: BoundedVec<1024>,
+    i: usize,
+) -> TestResult {
+    let mut a = BS1::create();
+    let mut b = BS1::create();
+    let mut naive_a = BTreeBitSet::create();
+    let mut naive_b = BTreeBitSet::create();
+
+    initial_state_a.0.iter().for_each(|&i| {
+        a.set(i);
+        naive_a.set(i)
+    });
+    initial_state_b.0.iter().for_each(|&i| {
+        b.set(i);
+        naive_b.set(i)
+    });
+
+    let max_a = initial_state_a.0.iter().max().copied().unwrap_or(0);
+    let max_b = initial_state_b.0.iter().max().copied().unwrap_or(0);
+    let ge = if max_a.max(max_b) == 0 {
+        0
+    } else {
+        i % max_a.max(max_b)
+    };
+
+    let res = a.intersect_first_set_ge(&b, ge);
+    let naive_res = naive_a.intersect_first_set_ge(&naive_b, ge);
+    if res != naive_res {
+        println!(
+            "Failed on intersect_first_set_ge with ge: {}\n\
+             good: {:?} ({:?})\n\
+             naive: {:?} ({:?})",
+            ge,
+            res,
+            a.iter().collect::<Vec<usize>>(),
+            naive_res,
+            naive_a.iter().collect::<Vec<usize>>()
+        );
+        return TestResult::failed();
+    }
+
+    TestResult::passed()
+}
+
+#[quickcheck]
+fn intersect_first_set(
+    initial_state_a: BoundedVec<1024>,
+    initial_state_b: BoundedVec<1024>,
+) -> TestResult {
+    let mut a = BS1::create();
+    let mut b = BS1::create();
+    let mut naive_a = BTreeBitSet::create();
+    let mut naive_b = BTreeBitSet::create();
+
+    initial_state_a.0.iter().for_each(|&i| {
+        a.set(i);
+        naive_a.set(i)
+    });
+    initial_state_b.0.iter().for_each(|&i| {
+        b.set(i);
+        naive_b.set(i)
+    });
+
+    let res = a.intersect_first_set(&b);
+    let naive_res = naive_a.intersect_first_set(&naive_b);
+    if res != naive_res {
+        println!(
+            "Failed on intersect_first_set\n\
+             good: {:?} ({:?})\n\
+             naive: {:?} ({:?})",
+            res,
+            a.iter().collect::<Vec<usize>>(),
+            naive_res,
+            naive_a.iter().collect::<Vec<usize>>()
+        );
+        return TestResult::failed();
     }
 
     TestResult::passed()
