@@ -203,7 +203,7 @@ fn apply2<BitSet: BitSetT>(bs1: &mut BitSet, bs2: &mut BitSet, op: &PairBitSetOp
 }
 
 #[quickcheck]
-fn prop_bitset_matches_naive(initial_state: BoundedVec<1024>, ops: Ops) -> TestResult {
+fn qc_prop_bitset_matches_naive(initial_state: BoundedVec<1024>, ops: Ops) -> TestResult {
     let mut b = BS1::create();
     let mut naive = BTreeBitSet::create();
     initial_state.0.iter().for_each(|&i| {
@@ -231,7 +231,7 @@ fn prop_bitset_matches_naive(initial_state: BoundedVec<1024>, ops: Ops) -> TestR
 }
 
 #[quickcheck]
-fn prop_bitset_matches_naive2(
+fn qc_prop_bitset_matches_naive2(
     initial_state_a: BoundedVec<1024>,
     initial_state_b: BoundedVec<1024>,
     ops: BinOps,
@@ -271,7 +271,7 @@ fn prop_bitset_matches_naive2(
 }
 
 #[quickcheck]
-fn intersect_first_set_ge(
+fn qc_intersect_first_set_ge(
     initial_state_a: BoundedVec<1024>,
     initial_state_b: BoundedVec<1024>,
     i: usize,
@@ -318,7 +318,7 @@ fn intersect_first_set_ge(
 }
 
 #[quickcheck]
-fn intersect_first_set(
+fn qc_intersect_first_set(
     initial_state_a: BoundedVec<1024>,
     initial_state_b: BoundedVec<1024>,
 ) -> TestResult {

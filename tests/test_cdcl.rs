@@ -152,11 +152,11 @@ mod tests {
             Continue
             found unit clause: Literal { value: 2 } in clause ("(1 2)")
             adding to trail at decision level 1: 2
-            satisfy_clauses: clauses satisfied by literal 2: (1 2 3), (1 2 -3), (-2 4), (1 -2 -4), (1 2)
+            satisfy_clauses: clauses satisfied by literal 2: (1 2 3), (1 2 -3), (1 2)
             found unit clause: Literal { value: 4 } in clause ("(-2 4)")
             would be contradiction with clause "(1 -2 -4)" for literal 4
             adding to trail at decision level 1: 4
-            satisfy_clauses: clauses satisfied by literal 4: (1 2 3), (-2 4)
+            satisfy_clauses: clauses satisfied by literal 4: (-2 4)
             reacting to action: Contradiction(3) at decision level 1
             undoing trail entry: 4 at decision level 1
             undoing trail entry: 2 at decision level 1
@@ -165,17 +165,17 @@ mod tests {
             Continue
             found unit clause: Literal { value: 1 } in clause ("(1)")
             adding to trail at decision level 0: 1
-            satisfy_clauses: clauses satisfied by literal 1: (1 2 3), (1 2 -3), (1 -2 -4), (-1 5 6), (-1 5 -6), (-1 -5 6), (1 2), (1)
+            satisfy_clauses: clauses satisfied by literal 1: (1 2 3), (1 2 -3), (1 -2 -4), (1 2), (1)
 
             Continue
             reacting to action: Continue(Literal { value: 3 }, true) at decision level 1
             adding to trail at decision level 1: 3
-            satisfy_clauses: clauses satisfied by literal 3: (1 2 3), (1 2 -3), (-2 4), (1 -2 -4), (1 2)
+            satisfy_clauses: clauses satisfied by literal 3: 
 
             Continue
             reacting to action: Continue(Literal { value: -5 }, true) at decision level 2
             adding to trail at decision level 2: -5
-            satisfy_clauses: clauses satisfied by literal -5: (1 2 3), (-2 4), (-5 -6), (-1 -5 6)
+            satisfy_clauses: clauses satisfied by literal -5: (-5 -6), (-1 -5 6)
 
             Continue
             found unit clause: Literal { value: 6 } in clause ("(-1 5 6)")
@@ -188,14 +188,14 @@ mod tests {
             undoing trail entry: 3 at decision level 1
 
             Continue
-            found unit clause: Literal { value: 2 } in clause ("(1 2)")
-            adding to trail at decision level 0: 2
-            satisfy_clauses: clauses satisfied by literal 2: (1 2 3), (1 2 -3), (-2 4), (1 -2 -4), (1 2)
-            found unit clause: Literal { value: 4 } in clause ("(-2 4)")
-            would be contradiction with clause "(1 -2 -4)" for literal 4
-            adding to trail at decision level 0: 4
-            satisfy_clauses: clauses satisfied by literal 4: (1 2 3), (-2 4), (-5 -6), (-1 -5 6)
-            reacting to action: Contradiction(3) at decision level 0
+            found unit clause: Literal { value: 5 } in clause ("(-1 5)")
+            adding to trail at decision level 0: 5
+            satisfy_clauses: clauses satisfied by literal 5: (-1 5 6), (-1 5 -6), (-1 5)
+            found unit clause: Literal { value: -6 } in clause ("(-5 -6)")
+            would be contradiction with clause "(-1 -5 6)" for literal -6
+            adding to trail at decision level 0: -6
+            satisfy_clauses: clauses satisfied by literal -6: (-5 -6)
+            reacting to action: Contradiction(7) at decision level 0
 
             Done(Unsat)
         "#]];

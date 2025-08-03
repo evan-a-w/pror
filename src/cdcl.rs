@@ -201,13 +201,23 @@ impl<Config: ConfigT> State<Config> {
             .set(trail_entry.literal.variable());
     }
 
+    fn acquire_bitset(&mut self) -> Config::BitSet {
+        let mut res = self.bitset_pool.acquire(|| Config::BitSet::create());
+        res.clear_all();
+        res
+    }
+
+    fn free_bitset(&mut self, bitset: Config::BitSet) {
+        self.bitset_pool.release(bitset);
+    }
+
     fn satisfy_clauses(&mut self, trail_entry: &TrailEntry<Config::BitSet>) -> Config::BitSet {
         let literal = trail_entry.literal;
         let var = literal.variable();
         let mut scratch_clause_bitset = std::mem::take(&mut self.scratch_clause_bitset).unwrap();
         scratch_clause_bitset.clear_all();
         scratch_clause_bitset.intersect(self.clauses(literal), &self.unsatisfied_clauses);
-        let mut newly_set = self.bitset_pool.acquire(|| Config::BitSet::create());
+        let mut newly_set = self.acquire_bitset();
         for clause_idx in scratch_clause_bitset.iter() {
             let clause = &self.clauses[clause_idx];
             let desired_value = !clause.negatives.contains(var);
@@ -345,13 +355,17 @@ impl<Config: ConfigT> State<Config> {
         let mut learned = self.clauses[failed_clause_idx.0].copy(&mut self.bitset_pool);
         for trail_entry in self.trail.iter().rev() {
             if self.only_one_at_level(&learned) {
+                // assert!(
+                //     trail_entry.decision_level == 0
+                //         || matches!(trail_entry.reason, Reason::Decision(_))
+                // );
                 break;
             }
             if !learned.variables.contains(trail_entry.literal.variable()) {
                 continue;
             }
             match trail_entry.reason {
-                Reason::Decision(_) => (), // never reach this
+                Reason::Decision(_) => assert!(false), // never reach this
                 Reason::ClauseIdx(clause_idx) => {
                     learned.resolve_exn(&self.clauses[clause_idx], trail_entry.literal.variable())
                 }
@@ -637,8 +651,8 @@ impl ConfigT for RandomConfig {
 }
 
 impl ConfigT for RandomConfigDebug {
-    // type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
-    type BitSet = BTreeBitSet;
+    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
+    // type BitSet = BTreeBitSet;
 
     fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
         choose_random_literal(state)
