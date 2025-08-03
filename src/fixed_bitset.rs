@@ -273,6 +273,99 @@ where
         }
     }
 
+    /// Difference: no grow.
+    pub fn difference_with(&mut self, other: &Self) {
+        for b in 0..self.storage.block_count().min(other.storage.block_count()) {
+            let me = self.storage.block_mut(b);
+            let them = other.storage.block(b);
+            for (a, &bb) in me.iter_mut().zip(them.iter()) {
+                *a &= !bb;
+            }
+        }
+    }
+
+    fn usize_iter_ones(x: usize) -> impl Iterator<Item = usize> {
+        let mut mask = x;
+        iter::from_fn(move || {
+            if mask == 0 {
+                return None;
+            }
+            let tz = mask.trailing_zeros() as usize;
+            let idx = tz + 1;
+            mask &= !(1 << tz);
+            Some(idx - 1)
+        })
+    }
+
+    fn iter_bit_indices<'a, I: Iterator<Item = usize> + 'a>(
+        words: I,
+        block_index: usize,
+    ) -> impl Iterator<Item = usize> + 'a
+    where
+        S: 'a,
+    {
+        words.enumerate().flat_map(move |(wi, w)| {
+            Self::usize_iter_ones(w)
+                .map(move |x| block_index * Self::BITS_PER_BLOCK + wi * usize::BITS as usize + x)
+        })
+    }
+
+    pub fn iter_union<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = usize> + 'a {
+        let for_extra = if self.storage.block_count() > other.storage.block_count() {
+            self
+        } else {
+            other
+        };
+        let min = self.storage.block_count().min(other.storage.block_count());
+        let extra = (min..for_extra.storage.block_count()).flat_map(move |b| {
+            Self::iter_bit_indices(for_extra.storage.block(b).iter().copied(), b)
+        });
+        (0..min)
+            .flat_map(move |b| {
+                Self::iter_bit_indices(
+                    self.storage
+                        .block(b)
+                        .iter()
+                        .zip(other.storage.block(b).iter())
+                        .map(move |(&a, &b)| a | b),
+                    b,
+                )
+            })
+            .chain(extra)
+    }
+
+    pub fn iter_intersection<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = usize> + 'a {
+        let min = self.storage.block_count().min(other.storage.block_count());
+        (0..min).flat_map(move |b| {
+            Self::iter_bit_indices(
+                self.storage
+                    .block(b)
+                    .iter()
+                    .zip(other.storage.block(b).iter())
+                    .map(move |(&a, &b)| a & b),
+                b,
+            )
+        })
+    }
+
+    pub fn iter_difference<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = usize> + 'a {
+        let min = self.storage.block_count().min(other.storage.block_count());
+        let extra = (min..self.storage.block_count())
+            .flat_map(move |b| Self::iter_bit_indices(self.storage.block(b).iter().copied(), b));
+        (0..min)
+            .flat_map(move |b| {
+                Self::iter_bit_indices(
+                    self.storage
+                        .block(b)
+                        .iter()
+                        .zip(other.storage.block(b).iter())
+                        .map(move |(&a, &b)| a & !b),
+                    b,
+                )
+            })
+            .chain(extra)
+    }
+
     pub fn intersect(&mut self, aset: &Self, bset: &Self) {
         let cap = aset.capacity().max(bset.capacity());
         if self.capacity() > cap {
@@ -300,16 +393,6 @@ where
         }
     }
 
-    /// Difference: no grow.
-    pub fn difference_with(&mut self, other: &Self) {
-        for b in 0..self.storage.block_count().min(other.storage.block_count()) {
-            let me = self.storage.block_mut(b);
-            let them = other.storage.block(b);
-            for (a, &bb) in me.iter_mut().zip(them.iter()) {
-                *a &= !bb;
-            }
-        }
-    }
     pub fn set_between(&mut self, start: usize, end: usize) {
         if start >= end {
             return;
@@ -449,7 +532,21 @@ where
         self.difference_with(other);
     }
 
+    fn iter_union<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = usize> + 'a {
+        self.iter_union(other)
+    }
+
+    fn iter_intersection<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = usize> + 'a {
+        self.iter_intersection(other)
+    }
+
+    fn iter_difference<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = usize> + 'a {
+        self.iter_difference(other)
+    }
+
     fn create() -> Self {
         BitSet::<S, N>::new(0)
     }
 }
+
+pub type DefaultBitSet = BitSet<Vec<[usize; 1]>, 1>;

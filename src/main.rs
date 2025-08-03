@@ -1,8 +1,10 @@
+use pror::bitset::*;
 use pror::cdcl::*;
 use pror::dimacs;
+use pror::fixed_bitset::*;
 use pror::sat::*;
 
-fn step_and_print(solver: &mut DefaultDebug, literal_override: Option<Literal>) {
+fn step_and_print(solver: &mut Default, literal_override: Option<Literal>) {
     let result = solver.step(literal_override);
     println!("\n{:?}", result);
 }
@@ -18,7 +20,7 @@ fn long() {
         vec![-5, -6],
         vec![-1, -5, 6],
     ];
-    let mut solver = DefaultDebug::new_from_vec(formula);
+    let mut solver = Default::new_from_vec(formula);
     step_and_print(&mut solver, Some(Literal::new(1, false)));
     step_and_print(&mut solver, Some(Literal::new(2, false)));
     step_and_print(&mut solver, Some(Literal::new(2, false)));
@@ -35,7 +37,7 @@ fn wikipedia() {
         vec![7, 8, -10],
         vec![7, 10, -12],
     ];
-    let mut solver = DefaultDebug::new_from_vec(formula);
+    let mut solver = Default::new_from_vec(formula);
     step_and_print(&mut solver, Some(Literal::new(1, false)));
     step_and_print(&mut solver, None);
     step_and_print(&mut solver, Some(Literal::new(3, true)));
@@ -48,15 +50,41 @@ fn wikipedia() {
     }
 }
 
-pub fn main() {
-    // wikipedia();
-    // long()
+fn sudoku() {
     let formula = dimacs::read_string(dimacs::SUDOKU);
-    // let formula = vec![vec![1, 2], vec![-2, 3], vec![-1, -3]];
-    // let formula = dimacs::read_string(dimacs::FAIL_EG);
-    // let formula = dimacs::read_string(dimacs::SUCC_EG);
     let res = Default::solve(formula);
-    // let res = DefaultDebug::solve(formula);
-    // let res = State::<FirstSetConfigDebug>::solve(formula);
     println! {"res: {:?}", res};
+}
+
+fn succ_eg() {
+    let formula = dimacs::read_string(dimacs::SUCC_EG);
+    let res = Default::solve(formula);
+    println! {"res: {:?}", res};
+}
+
+fn fail_eg() {
+    let formula = dimacs::read_string(dimacs::FAIL_EG);
+    let res = Default::solve(formula);
+    println! {"res: {:?}", res};
+}
+
+fn useless_set_thing() {
+    let mut a = DefaultBitSet::create();
+    let mut b = DefaultBitSet::create();
+    a.set(1);
+    a.set(3);
+    a.set(323213123);
+    b.set(10);
+    b.set(101024);
+    a.iter_union(&b).for_each(|x| {
+        println!("x: {}", x);
+    });
+}
+
+pub fn main() {
+    wikipedia();
+    long();
+    // fail_eg();
+    succ_eg();
+    sudoku();
 }

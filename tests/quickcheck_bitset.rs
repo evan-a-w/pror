@@ -318,6 +318,43 @@ fn qc_intersect_first_set_ge(
 }
 
 #[quickcheck]
+fn qc_iter_difference(
+    initial_state_a: BoundedVec<1024>,
+    initial_state_b: BoundedVec<1024>,
+) -> TestResult {
+    let mut a = BS1::create();
+    let mut b = BS1::create();
+    let mut naive_a = BTreeBitSet::create();
+    let mut naive_b = BTreeBitSet::create();
+
+    initial_state_a.0.iter().for_each(|&i| {
+        a.set(i);
+        naive_a.set(i)
+    });
+    initial_state_b.0.iter().for_each(|&i| {
+        b.set(i);
+        naive_b.set(i)
+    });
+
+    let res = a.iter_difference(&b).collect::<Vec<usize>>();
+    let naive_res = naive_a.iter_difference(&naive_b).collect::<Vec<usize>>();
+    if res != naive_res {
+        println!(
+            "Failed on intersect_first_set\n\
+             good: {:?} ({:?})\n\
+             naive: {:?} ({:?})",
+            res,
+            a.iter().collect::<Vec<usize>>(),
+            naive_res,
+            naive_a.iter().collect::<Vec<usize>>()
+        );
+        return TestResult::failed();
+    }
+
+    TestResult::passed()
+}
+
+#[quickcheck]
 fn qc_intersect_first_set(
     initial_state_a: BoundedVec<1024>,
     initial_state_b: BoundedVec<1024>,

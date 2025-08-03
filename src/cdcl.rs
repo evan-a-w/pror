@@ -2,7 +2,6 @@ use crate::bitset::{BTreeBitSet, BitSetT};
 use crate::fixed_bitset;
 use crate::pool::Pool;
 use crate::sat::*;
-use itertools::Either;
 use rand::prelude::*;
 use rand_pcg::Pcg64;
 use std::cell::RefCell;
@@ -130,14 +129,6 @@ impl<Config: ConfigT> State<Config> {
             }
             None => None,
         }
-    }
-
-    // TODO: maybe not needed
-    fn clause_is_satisfied(&self, clause: &Clause<Config::BitSet>) -> bool {
-        clause
-            .variables
-            .iter_difference(&self.unassigned_variables)
-            .any(|var| self.assignments.contains(var) != clause.negatives.contains(var))
     }
 
     fn first_unit_clause(&self) -> Option<(Literal, ClauseIdx)> {
@@ -353,12 +344,23 @@ impl<Config: ConfigT> State<Config> {
         failed_clause_idx: ClauseIdx,
     ) -> Clause<Config::BitSet> {
         let mut learned = self.clauses[failed_clause_idx.0].copy(&mut self.bitset_pool);
+        let mut num_at_level = 0;
+
+        for lit in learned.iter_literals() {
+            let var = lit.variable();
+            if let Some(idx) = self.trail_entry_idx_by_var[var] {
+                let entry = &self.trail[idx];
+                if entry.decision_level == self.decision_level {
+                    num_at_level += 1;
+                }
+            }
+        }
+
         for trail_entry in self.trail.iter().rev() {
-            if self.only_one_at_level(&learned) {
-                // assert!(
-                //     trail_entry.decision_level == 0
-                //         || matches!(trail_entry.reason, Reason::Decision(_))
-                // );
+            // if self.only_one_at_level(&learned) {
+            //     break;
+            // }
+            if num_at_level == 1 {
                 break;
             }
             if !learned.variables.contains(trail_entry.literal.variable()) {
@@ -367,7 +369,23 @@ impl<Config: ConfigT> State<Config> {
             match trail_entry.reason {
                 Reason::Decision(_) => assert!(false), // never reach this
                 Reason::ClauseIdx(clause_idx) => {
-                    learned.resolve_exn(&self.clauses[clause_idx], trail_entry.literal.variable())
+                    for lit in self.clauses[clause_idx].iter_literals().filter(|lit| {
+                        lit.variable() == trail_entry.literal.variable()
+                            || !learned.variables.contains(lit.variable())
+                    }) {
+                        let var = lit.variable();
+                        if let Some(idx) = self.trail_entry_idx_by_var[var] {
+                            let entry = &self.trail[idx];
+                            if entry.decision_level == self.decision_level {
+                                if var == trail_entry.literal.variable() {
+                                    num_at_level -= 1;
+                                } else {
+                                    num_at_level += 1;
+                                }
+                            }
+                        }
+                    }
+                    learned.resolve_exn(&self.clauses[clause_idx], trail_entry.literal.variable());
                 }
             }
         }
