@@ -1,4 +1,5 @@
 use std::iter;
+use std::ops::Bound;
 
 /// A generic BitSet interface capturing common bitset operations.
 pub trait BitSetT {
@@ -131,5 +132,178 @@ pub trait BitSetT {
                 return None;
             }
         })
+    }
+}
+
+pub struct BTreeBitSet {
+    set: std::collections::BTreeSet<usize>,
+}
+
+impl BTreeBitSet {
+    fn max_elem_plus_one(&self) -> usize {
+        self.set.iter().rev().next().map(|x| x + 1).unwrap_or(0)
+    }
+}
+
+impl BitSetT for BTreeBitSet {
+    fn create() -> Self {
+        Self {
+            set: std::collections::BTreeSet::new(),
+        }
+    }
+
+    /// No-op: BTreeSet grows dynamically. We maintain capacity as max element + 1.
+    fn grow(&mut self, _bits: usize) {}
+
+    fn capacity(&self) -> usize {
+        // capacity is the minimum number of bits needed to represent current content
+        self.max_elem_plus_one()
+    }
+
+    fn clear_all(&mut self) {
+        self.set.clear();
+    }
+
+    fn set(&mut self, bit: usize) {
+        self.set.insert(bit);
+    }
+
+    fn set_between(&mut self, start_bit_incl: usize, end_bit_excl: usize) {
+        if start_bit_incl >= end_bit_excl {
+            return;
+        }
+        for i in start_bit_incl..end_bit_excl {
+            self.set.insert(i);
+        }
+    }
+
+    fn clear(&mut self, bit: usize) {
+        self.set.remove(&bit);
+    }
+
+    fn contains(&self, bit: usize) -> bool {
+        self.set.contains(&bit)
+    }
+
+    fn first_set(&self) -> Option<usize> {
+        self.set.iter().next().copied()
+    }
+
+    fn first_unset(&self) -> Option<usize> {
+        self.first_unset_ge(0)
+    }
+
+    fn first_set_ge(&self, bit: usize) -> Option<usize> {
+        self.set
+            .range((Bound::Included(bit), Bound::Unbounded))
+            .next()
+            .copied()
+    }
+
+    fn first_unset_ge(&self, bit: usize) -> Option<usize> {
+        // Walk through set starting from bit, looking for gaps.
+        let mut expected = bit;
+        for &s in self.set.range((Bound::Included(bit), Bound::Unbounded)) {
+            if s > expected {
+                return Some(expected);
+            } else if s == expected {
+                expected += 1;
+            } else {
+                // s < expected (shouldn't happen because range is >= bit), skip
+            }
+        }
+        Some(expected)
+    }
+
+    fn union_with(&mut self, other: &Self) {
+        for &x in &other.set {
+            self.set.insert(x);
+        }
+    }
+
+    fn intersect_with(&mut self, other: &Self) {
+        self.set = self
+            .set
+            .intersection(&other.set)
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+    }
+
+    fn difference_with(&mut self, other: &Self) {
+        self.set = self
+            .set
+            .difference(&other.set)
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+    }
+
+    fn intersect(&mut self, a: &Self, b: &Self) {
+        self.set = a
+            .set
+            .intersection(&b.set)
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+    }
+
+    fn nth(&self, n: usize) -> Option<usize> {
+        self.set.iter().nth(n).copied()
+    }
+
+    fn count(&self) -> usize {
+        self.set.len()
+    }
+}
+
+// Optional: expose iterator helpers similar to trait defaults
+impl BTreeBitSet {
+    pub fn iter(&self) -> impl Iterator<Item = usize> + '_ {
+        self.set.iter().copied()
+    }
+
+    pub fn iter_union<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = usize> + 'a {
+        let mut a_iter = self.set.iter().peekable();
+        let mut b_iter = other.set.iter().peekable();
+        iter::from_fn(move || loop {
+            match (a_iter.peek(), b_iter.peek()) {
+                (Some(&&a), Some(&&b)) => {
+                    if a < b {
+                        a_iter.next();
+                        return Some(a);
+                    } else if b < a {
+                        b_iter.next();
+                        return Some(b);
+                    } else {
+                        a_iter.next();
+                        b_iter.next();
+                        return Some(a);
+                    }
+                }
+                (Some(&&a), None) => {
+                    a_iter.next();
+                    return Some(a);
+                }
+                (None, Some(&&b)) => {
+                    b_iter.next();
+                    return Some(b);
+                }
+                (None, None) => return None,
+            }
+        })
+    }
+
+    pub fn iter_intersection<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = usize> + 'a {
+        self.set
+            .intersection(&other.set)
+            .copied()
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    pub fn iter_difference<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = usize> + 'a {
+        self.set
+            .difference(&other.set)
+            .copied()
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 }

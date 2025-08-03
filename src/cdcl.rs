@@ -14,7 +14,6 @@ pub trait ConfigT: Sized {
     fn choose_literal(state: &mut State<Self>) -> Option<Literal>;
 
     const DEBUG: bool;
-    const USE_BACKTRACK_STATE: bool;
 }
 
 #[macro_export]
@@ -71,7 +70,7 @@ pub struct State<Config: ConfigT> {
     unassigned_variables: Config::BitSet,
     unsatisfied_clauses: Config::BitSet,
     clauses_by_var: Vec<Config::BitSet>,
-    trail_entry_idx_by_var: Vec<usize>,
+    trail_entry_idx_by_var: Vec<Option<usize>>,
     scratch_clause_bitset: Option<Config::BitSet>,
     scratch_variable_bitset: Option<Config::BitSet>,
     decision_level: usize,
@@ -149,24 +148,16 @@ impl<Config: ConfigT> State<Config> {
         })
     }
 
-    fn clauses_mut(&mut self, literal: Literal) -> Option<&mut Config::BitSet> {
-        if literal.variable() < self.clauses_by_var.len() {
-            Some(&mut self.clauses_by_var[literal.variable()])
-        } else {
-            None
-        }
+    fn clauses_mut(&mut self, literal: Literal) -> &mut Config::BitSet {
+        &mut self.clauses_by_var[literal.variable()]
     }
 
-    fn clauses(&self, literal: Literal) -> Option<&Config::BitSet> {
-        if literal.variable() < self.clauses_by_var.len() {
-            Some(&self.clauses_by_var[literal.variable()])
-        } else {
-            None
-        }
+    fn clauses(&self, literal: Literal) -> &Config::BitSet {
+        &self.clauses_by_var[literal.variable()]
     }
 
     fn would_be_contradiction(&self, literal: Literal) -> Option<ClauseIdx> {
-        self.clauses(literal)?
+        self.clauses(literal)
             .iter_intersection(&self.unsatisfied_clauses)
             .find_map(|clause_idx| {
                 let clause = &self.clauses[clause_idx];
@@ -205,7 +196,7 @@ impl<Config: ConfigT> State<Config> {
                 self.bitset_pool.release(clauses);
             }
         };
-        self.trail_entry_idx_by_var[trail_entry.literal.variable()] = usize::MAX;
+        self.trail_entry_idx_by_var[trail_entry.literal.variable()] = None;
         self.unassigned_variables
             .set(trail_entry.literal.variable());
     }
@@ -215,11 +206,7 @@ impl<Config: ConfigT> State<Config> {
         let var = literal.variable();
         let mut scratch_clause_bitset = std::mem::take(&mut self.scratch_clause_bitset).unwrap();
         scratch_clause_bitset.clear_all();
-        let clauses = self.clauses(literal);
-        match clauses {
-            None => (),
-            Some(clauses) => scratch_clause_bitset.intersect(clauses, &self.unsatisfied_clauses),
-        }
+        scratch_clause_bitset.intersect(self.clauses(literal), &self.unsatisfied_clauses);
         let mut newly_set = self.bitset_pool.acquire(|| Config::BitSet::create());
         for clause_idx in scratch_clause_bitset.iter() {
             let clause = &self.clauses[clause_idx];
@@ -258,12 +245,12 @@ impl<Config: ConfigT> State<Config> {
             self.assignments.clear(var);
         }
         assert!(
-            self.trail_entry_idx_by_var[var] == usize::MAX,
+            self.trail_entry_idx_by_var[var].is_none(),
             "trail entry for var {} already exists: {:?}",
             var,
             self.trail_entry_idx_by_var[var]
         );
-        self.trail_entry_idx_by_var[var] = self.trail.len();
+        self.trail_entry_idx_by_var[var] = Some(self.trail.len());
         self.unassigned_variables.clear(var);
         trail_entry.satisfied_clauses = Some(self.satisfy_clauses(&trail_entry));
         self.trail.push(trail_entry);
@@ -317,27 +304,15 @@ impl<Config: ConfigT> State<Config> {
         }
     }
 
-    fn literal_in_trail_for_var(&self, var: usize) -> Literal {
-        let idx = self.trail_entry_idx_by_var[var];
-        if idx == usize::MAX {
-            panic!("no entry for var {}", var);
-        }
-        self.trail[idx].literal
-    }
-
-    fn iter_reason_literals<'a>(&'a self, reason: Reason) -> impl Iterator<Item = Literal> + 'a {
-        match reason {
-            Reason::Decision(lit) => Either::Left(std::iter::once(lit)),
-            Reason::ClauseIdx(idx) => Either::Right(self.clauses[idx].iter_literals()),
-        }
-    }
-
     fn only_one_at_level(&self, clause: &Clause<Config::BitSet>) -> bool {
         clause
             .iter_literals()
-            .filter(|&lit| {
-                let idx = self.trail_entry_idx_by_var[lit.variable()];
-                self.trail[idx].decision_level == self.decision_level
+            .filter(|&lit| match self.trail_entry_idx_by_var[lit.variable()] {
+                None => false,
+                Some(idx) => {
+                    let entry = &self.trail[idx];
+                    entry.decision_level == self.decision_level
+                }
             })
             .count()
             == 1
@@ -348,7 +323,10 @@ impl<Config: ConfigT> State<Config> {
         let mut max2 = 0;
         for lit in clause.iter_literals() {
             let var = lit.variable();
-            let idx = self.trail_entry_idx_by_var[var];
+            let idx = match self.trail_entry_idx_by_var[var] {
+                None => continue,
+                Some(idx) => idx,
+            };
             let entry = &self.trail[idx];
             if entry.decision_level > max1 {
                 max2 = max1;
@@ -360,86 +338,26 @@ impl<Config: ConfigT> State<Config> {
         max2
     }
 
-    fn next_entry_for_learned_clause(&self, clause: &Clause<Config::BitSet>) -> Option<usize> {
-        clause
-            .iter_literals()
-            .filter_map(|lit| {
-                let idx = self.trail_entry_idx_by_var[lit.variable()];
-                let entry = &self.trail[idx];
-                let can_resolve = match entry.reason {
-                    Reason::Decision(_) => false,
-                    Reason::ClauseIdx(clause_idx) => {
-                        let resolve_with = &self.clauses[clause_idx];
-                        clause.can_resolve(resolve_with, entry.literal.variable())
-                    }
-                };
-                if !entry.is_from_decision_point()
-                    && entry.decision_level == self.decision_level
-                    && can_resolve
-                {
-                    Some(idx)
-                } else {
-                    None
-                }
-            })
-            .max()
-    }
-
     fn learn_clause_from_failure(
         &mut self,
         failed_clause_idx: ClauseIdx,
-    ) -> (Clause<Config::BitSet>, usize) {
-        let mut learned = {
-            let mut variables = self.bitset_pool.acquire(|| Config::BitSet::create());
-            let mut negatives = self.bitset_pool.acquire(|| Config::BitSet::create());
-            variables.clear_all();
-            negatives.clear_all();
-            variables.union_with(&self.clauses[failed_clause_idx.0].variables);
-            negatives.union_with(&self.clauses[failed_clause_idx.0].negatives);
-            Clause {
-                variables,
-                negatives,
+    ) -> Clause<Config::BitSet> {
+        let mut learned = self.clauses[failed_clause_idx.0].copy(&mut self.bitset_pool);
+        for trail_entry in self.trail.iter().rev() {
+            if self.only_one_at_level(&learned) {
+                break;
             }
-        };
-        while !self.only_one_at_level(&learned) {
-            match self.next_entry_for_learned_clause(&learned) {
-                None => assert!(
-                    false,
-                    "More than one literal at level, but no next entry found for learned clause"
-                ),
-                Some(idx) => {
-                    let entry = &self.trail[idx];
-                    let lit = entry.literal;
-                    match entry.reason {
-                        Reason::Decision(_) => assert!(
-                            false,
-                            "Unexpected decision in trail entry for learned clause"
-                        ),
-                        Reason::ClauseIdx(clause_idx) => {
-                            let resolve_with = &self.clauses[clause_idx];
-                            debug!(
-                                self.debug_writer,
-                                "Resolving learned {} with {} on {}",
-                                learned.to_string(),
-                                resolve_with.to_string(),
-                                lit.variable()
-                            );
-
-                            learned.resolve_exn(resolve_with, lit.variable());
-                        }
-                    }
+            if !learned.variables.contains(trail_entry.literal.variable()) {
+                continue;
+            }
+            match trail_entry.reason {
+                Reason::Decision(_) => (), // never reach this
+                Reason::ClauseIdx(clause_idx) => {
+                    learned.resolve_exn(&self.clauses[clause_idx], trail_entry.literal.variable())
                 }
             }
         }
-        let backtrack_level = self.second_highest_decision_level(&learned);
-        debug!(
-            self.debug_writer,
-            "learned clause: {:?} from failed clause {:?}, backtrack level: {}",
-            learned.to_string(),
-            self.clause_string(failed_clause_idx),
-            backtrack_level
-        );
-        (learned, backtrack_level)
+        learned
     }
 
     fn remove_from_trail_helper(&mut self, remove_greater_than: Option<usize>) -> Option<Literal> {
@@ -476,33 +394,16 @@ impl<Config: ConfigT> State<Config> {
         }
     }
 
-    fn backtrack(&mut self, failed_clause_idx: ClauseIdx) -> Option<Literal> {
-        let (learned_clause, remove_greater_than) =
-            self.learn_clause_from_failure(failed_clause_idx);
+    fn backtrack(&mut self, failed_clause_idx: ClauseIdx) {
+        let learned_clause = self.learn_clause_from_failure(failed_clause_idx);
+        let remove_greater_than = self.second_highest_decision_level(&learned_clause);
         for lit in learned_clause.iter_literals() {
             let len = self.clauses.len();
-            self.clauses_mut(lit).iter_mut().for_each(|clauses| {
-                clauses.set(len);
-            });
+            self.clauses_mut(lit).set(len);
         }
         self.unsatisfied_clauses.set(self.clauses.len());
         self.clauses.push(learned_clause);
-        let mut res = self.remove_from_trail_helper(Some(remove_greater_than));
-
-        if !Config::USE_BACKTRACK_STATE {
-            None
-        } else {
-            loop {
-                match res {
-                    None => (),
-                    res => break res,
-                }
-                res = self.remove_from_trail_helper(None);
-                if self.trail.is_empty() {
-                    break None;
-                }
-            }
-        }
+        self.remove_from_trail_helper(Some(remove_greater_than));
     }
 
     fn react(&mut self, action: Action) -> StepResult {
@@ -531,19 +432,8 @@ impl<Config: ConfigT> State<Config> {
                 StepResult::Done(SatResult::Unsat)
             }
             Action::Contradiction(failed_idx) => {
-                let back = self.backtrack(ClauseIdx(failed_idx));
-
-                if !Config::USE_BACKTRACK_STATE {
-                    StepResult::Continue
-                } else {
-                    match back {
-                        None => StepResult::Done(SatResult::Unsat),
-                        Some(lit) => {
-                            self.next_literal = Some(lit);
-                            StepResult::Continue
-                        }
-                    }
-                }
+                self.backtrack(ClauseIdx(failed_idx));
+                StepResult::Continue
             }
         }
     }
@@ -611,6 +501,7 @@ impl<Config: ConfigT> State<Config> {
         } = formula;
         let num_vars = max_var + 1;
         let mut variables_bitset = Config::BitSet::create();
+        variables_bitset.clear_all();
         let mut clauses_by_var = vec![];
 
         for var in vars {
@@ -618,7 +509,9 @@ impl<Config: ConfigT> State<Config> {
         }
 
         for _ in 0..num_vars {
-            clauses_by_var.push(bitset_pool.acquire(|| Config::BitSet::create()));
+            let mut bs = bitset_pool.acquire(|| Config::BitSet::create());
+            bs.clear_all();
+            clauses_by_var.push(bs);
         }
 
         let mut instantly_unsat = false;
@@ -649,7 +542,7 @@ impl<Config: ConfigT> State<Config> {
         unsatisfied_clauses.set_between(0, clauses.len());
         let all_variables = variables_bitset.clone();
         let unassigned_variables = variables_bitset;
-        let rng = Pcg64::seed_from_u64(1);
+        let rng = Pcg64::seed_from_u64(5);
         State {
             immediate_result,
             all_variables,
@@ -659,7 +552,7 @@ impl<Config: ConfigT> State<Config> {
             unassigned_variables,
             unsatisfied_clauses,
             clauses_by_var,
-            trail_entry_idx_by_var: vec![usize::MAX; num_vars],
+            trail_entry_idx_by_var: vec![None; num_vars],
             scratch_clause_bitset: Some(bitset_pool.acquire(|| Config::BitSet::create())),
             scratch_variable_bitset: Some(bitset_pool.acquire(|| Config::BitSet::create())),
             decision_level: 0,
@@ -708,38 +601,8 @@ impl<Config: ConfigT> State<Config> {
     }
 }
 
-pub struct FirstSetConfig {}
 pub struct RandomConfig {}
-pub struct FirstSetConfigDebug {}
 pub struct RandomConfigDebug {}
-
-impl ConfigT for FirstSetConfig {
-    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
-
-    fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
-        match state.unassigned_variables.first_set() {
-            None => None,
-            Some(var) => Some(Literal::new(var, true)),
-        }
-    }
-
-    const DEBUG: bool = false;
-    const USE_BACKTRACK_STATE: bool = true;
-}
-
-impl ConfigT for FirstSetConfigDebug {
-    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
-
-    fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
-        match state.unassigned_variables.first_set() {
-            None => None,
-            Some(var) => Some(Literal::new(var, true)),
-        }
-    }
-
-    const DEBUG: bool = true;
-    const USE_BACKTRACK_STATE: bool = true;
-}
 
 fn choose_random_literal<T: ConfigT>(state: &mut State<T>) -> Option<Literal> {
     let len = state.unassigned_variables.count();
@@ -765,7 +628,6 @@ impl ConfigT for RandomConfig {
     }
 
     const DEBUG: bool = false;
-    const USE_BACKTRACK_STATE: bool = false;
 }
 
 impl ConfigT for RandomConfigDebug {
@@ -776,7 +638,6 @@ impl ConfigT for RandomConfigDebug {
     }
 
     const DEBUG: bool = true;
-    const USE_BACKTRACK_STATE: bool = false;
 }
 
 pub type Default = State<RandomConfig>;

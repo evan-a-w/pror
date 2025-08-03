@@ -257,11 +257,18 @@ where
 
     /// Intersection: no grow.
     pub fn intersect_with(&mut self, other: &Self) {
-        for b in 0..self.storage.block_count().min(other.storage.block_count()) {
+        let min = self.storage.block_count().min(other.storage.block_count());
+        for b in 0..min {
             let me = self.storage.block_mut(b);
             let them = other.storage.block(b);
             for (a, &bb) in me.iter_mut().zip(them.iter()) {
                 *a &= bb;
+            }
+        }
+        for b in min..(self.storage.block_count()) {
+            let me = self.storage.block_mut(b);
+            for a in me.iter_mut() {
+                *a = 0; // Clear the rest of the blocks.
             }
         }
     }
@@ -281,6 +288,14 @@ where
             let b = bset.storage.block(bl);
             for ((m, &bb), &aa) in me.iter_mut().zip(a.iter()).zip(b.iter()) {
                 *m = bb & aa;
+            }
+        }
+        for b in (aset.storage.block_count().min(bset.storage.block_count()) + 1)
+            ..self.storage.block_count()
+        {
+            let me = self.storage.block_mut(b);
+            for a in me.iter_mut() {
+                *a = 0; // Clear the rest of the blocks.
             }
         }
     }

@@ -53,6 +53,17 @@ impl<BitSet: BitSetT> Clause<BitSet> {
         )
     }
 
+    pub fn copy(&self, bitset_pool: &mut Pool<BitSet>) -> Self {
+        let mut variables = bitset_pool.acquire(|| BitSet::create());
+        let mut negatives = bitset_pool.acquire(|| BitSet::create());
+        variables.intersect(&self.variables, &self.variables);
+        negatives.intersect(&self.negatives, &self.negatives);
+        Clause {
+            variables,
+            negatives,
+        }
+    }
+
     pub fn can_resolve(&self, other: &Self, on_var: usize) -> bool {
         self.variables.contains(on_var)
             && other.variables.contains(on_var)
@@ -127,12 +138,17 @@ impl<BitSet: BitSetT> Formula<BitSet> {
         for clause in formula {
             let mut variables = bitset_pool.acquire(|| BitSet::create());
             let mut negatives = bitset_pool.acquire(|| BitSet::create());
+            variables.clear_all();
+            negatives.clear_all();
 
             for lit in clause {
                 if lit == 0 {
                     panic!("Can't have 0 vars");
                 }
                 let var = lit.abs() as usize;
+                if variables.contains(var) {
+                    panic!("Variable {} appears multiple times in clause", var);
+                }
                 variables.set(var);
                 if lit < 0 {
                     negatives.set(var);
