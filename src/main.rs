@@ -20,10 +20,8 @@ fn long() {
         vec![-5, -6],
         vec![-1, -5, 6],
     ];
-    let mut solver = Default::new_from_vec(formula);
-    step_and_print(&mut solver, Some(Literal::new(1, false)));
-    step_and_print(&mut solver, Some(Literal::new(2, false)));
-    step_and_print(&mut solver, Some(Literal::new(2, false)));
+    let res = DefaultDebug::solve(formula);
+    println! {"res: {:?}", res};
 }
 
 fn wikipedia() {
@@ -56,6 +54,12 @@ fn sudoku() {
     println! {"res: {:?}", res};
 }
 
+fn simple() {
+    let formula = vec![vec![1, 2], vec![-2, 3], vec![-1, -3]];
+    let res = DefaultDebug::solve(formula);
+    println! {"res: {:?}", res};
+}
+
 fn succ_eg() {
     let formula = dimacs::read_string(dimacs::SUCC_EG);
     let res = Default::solve(formula);
@@ -82,9 +86,10 @@ fn useless_set_thing() {
 }
 
 pub fn main() {
-    wikipedia();
+    // wikipedia();
     long();
-    fail_eg();
-    succ_eg();
-    sudoku();
+    // fail_eg();
+    // succ_eg();
+    // sudoku();
+    // simple();
 }

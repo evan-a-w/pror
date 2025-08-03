@@ -60,12 +60,42 @@ impl<BitSet: BitSetT> TrailEntry<BitSet> {
     }
 }
 
+struct TfPair<T> {
+    pub first: T,
+    pub second: T,
+}
+
+impl<T> std::ops::Index<bool> for TfPair<T> {
+    type Output = T;
+
+    // Required method
+    fn index(&self, index: bool) -> &Self::Output {
+        if index {
+            &self.first
+        } else {
+            &self.second
+        }
+    }
+}
+
+impl<T> std::ops::IndexMut<bool> for TfPair<T> {
+    // Required method
+    fn index_mut(&mut self, index: bool) -> &mut T {
+        if index {
+            &mut self.first
+        } else {
+            &mut self.second
+        }
+    }
+}
+
 pub struct State<Config: ConfigT> {
     immediate_result: Option<SatResult>,
     all_variables: Config::BitSet,
     assignments: Config::BitSet,
     clauses: Vec<Clause<Config::BitSet>>,
-    watched_clauses: Vec<Vec<ClauseIdx>>,
+    watched_clauses: Vec<TfPair<Config::BitSet>>,
+    ready_for_unit_prop: Vec<(Literal, ClauseIdx)>,
     trail: Vec<TrailEntry<Config::BitSet>>,
     unassigned_variables: Config::BitSet,
     unsatisfied_clauses: Config::BitSet,
@@ -74,7 +104,6 @@ pub struct State<Config: ConfigT> {
     scratch_clause_bitset: Option<Config::BitSet>,
     scratch_variable_bitset: Option<Config::BitSet>,
     decision_level: usize,
-    next_literal: Option<Literal>,
     bitset_pool: Pool<Config::BitSet>,
     iterations: usize,
     rng: Pcg64,
@@ -103,6 +132,13 @@ enum Action {
 }
 
 impl<Config: ConfigT> State<Config> {
+    fn watched_clauses(&self, literal: Literal) -> &Config::BitSet {
+        &self.watched_clauses[literal.variable()][literal.value()]
+    }
+    fn watched_clauses_mut(&mut self, literal: Literal) -> &mut Config::BitSet {
+        &mut self.watched_clauses[literal.variable()][literal.value()]
+    }
+
     fn assignments(&self) -> BTreeMap<usize, bool> {
         self.all_variables
             .iter()
@@ -232,6 +268,41 @@ impl<Config: ConfigT> State<Config> {
         newly_set
     }
 
+    fn update_watched_clauses(&mut self, literal: Literal) {
+        for clause_idx in self
+            .watched_clauses(literal)
+            .iter_intersection(&self.unsatisfied_clauses)
+            .collect::<Vec<_>>()
+        {
+            let replace = self.clauses[clause_idx]
+                .iter_literals()
+                .filter(|&lit| {
+                    !self.watched_clauses(lit).contains(clause_idx)
+                        && self.unassigned_variables.contains(lit.variable())
+                })
+                .next();
+            debug!(
+                self.debug_writer,
+                "updating watched clauses for literal {} in clause ({:?})",
+                literal.to_string(),
+                self.clause_string(ClauseIdx(clause_idx))
+            );
+            match replace {
+                None => {
+                    let literal = self
+                        .try_get_unit_literal(&self.clauses[clause_idx])
+                        .unwrap();
+                    self.ready_for_unit_prop
+                        .push((literal, ClauseIdx(clause_idx)));
+                }
+                Some(to_replace) => {
+                    self.watched_clauses_mut(literal).clear(clause_idx);
+                    self.watched_clauses_mut(to_replace).set(clause_idx);
+                }
+            }
+        }
+    }
+
     fn add_to_trail(&mut self, mut trail_entry: TrailEntry<Config::BitSet>) {
         debug!(
             self.debug_writer,
@@ -259,7 +330,7 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn unit_propagate_internal(&mut self) -> UnitPropagationResult {
-        if let Some((literal, clause_idx)) = self.first_unit_clause() {
+        if let Some((literal, clause_idx)) = self.ready_for_unit_prop.pop() {
             self.with_unit_clause(literal, clause_idx)
         } else {
             UnitPropagationResult::FinishedUnitPropagation
@@ -299,7 +370,10 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn unit_propagate(&mut self) -> UnitPropagationResult {
-        if let Some((literal, clause_idx)) = self.first_unit_clause() {
+        if self.ready_for_unit_prop.is_empty() {
+            return UnitPropagationResult::NothingToPropagate;
+        }
+        if let Some((literal, clause_idx)) = self.ready_for_unit_prop.pop() {
             self.with_unit_clause(literal, clause_idx)
         } else {
             UnitPropagationResult::NothingToPropagate
@@ -435,8 +509,10 @@ impl<Config: ConfigT> State<Config> {
             self.clauses_mut(lit).set(len);
         }
         self.unsatisfied_clauses.set(self.clauses.len());
-        self.clauses.push(learned_clause);
         self.remove_from_trail_helper(Some(remove_greater_than));
+        self.clauses.push(learned_clause);
+        self.ready_for_unit_prop.clear();
+        self.update_watch_literals_for_new_clause(self.clauses.len() - 1);
     }
 
     fn react(&mut self, action: Action) -> StepResult {
@@ -472,9 +548,6 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn make_decision(&mut self, literal_override: Option<Literal>) -> StepResult {
-        if let Some(lit) = self.next_literal.take() {
-            return self.react(Action::Continue(lit, false));
-        }
         match Config::choose_literal(self) {
             None => {
                 let assignments = self.assignments();
@@ -494,12 +567,7 @@ impl<Config: ConfigT> State<Config> {
         if let Some(res) = self.immediate_result.take() {
             return StepResult::Done(res);
         }
-        let prop_res = if self.next_literal.is_some() {
-            UnitPropagationResult::NothingToPropagate
-        } else {
-            self.unit_propagate()
-        };
-        match prop_res {
+        match self.unit_propagate() {
             UnitPropagationResult::NothingToPropagate => self.make_decision(literal_override),
             UnitPropagationResult::FinishedUnitPropagation => StepResult::Continue,
             UnitPropagationResult::Contradiction(ClauseIdx(idx)) => {
@@ -521,6 +589,48 @@ impl<Config: ConfigT> State<Config> {
         }
     }
 
+    fn update_watch_literals_for_new_clause_helper(
+        clause: &Clause<Config::BitSet>,
+        clause_idx: usize,
+        watched_clauses: &mut Vec<TfPair<Config::BitSet>>,
+        ready_for_unit_prop: &mut Vec<(Literal, ClauseIdx)>,
+        unassigned_variables: &Config::BitSet,
+    ) {
+        let mut lits = clause
+            .iter_literals()
+            .filter(|lit| unassigned_variables.contains(lit.variable()));
+        match (lits.next(), lits.next()) {
+            (None, None) => (),
+            (None, Some(lit)) | (Some(lit), None) => {
+                watched_clauses[lit.variable()][lit.value()].set(clause_idx);
+                let other = clause
+                    .iter_literals()
+                    .find(|lit2| lit.variable() != lit2.variable());
+                match other {
+                    None => (),
+                    Some(b) => {
+                        watched_clauses[b.variable()][b.value()].set(clause_idx);
+                    }
+                };
+                ready_for_unit_prop.push((lit, ClauseIdx(clause_idx)));
+            }
+            (Some(a), Some(b)) => {
+                watched_clauses[a.variable()][a.value()].set(clause_idx);
+                watched_clauses[b.variable()][b.value()].set(clause_idx);
+            }
+        };
+    }
+
+    fn update_watch_literals_for_new_clause(&mut self, clause_idx: usize) {
+        Self::update_watch_literals_for_new_clause_helper(
+            &self.clauses[clause_idx],
+            clause_idx,
+            &mut self.watched_clauses,
+            &mut self.ready_for_unit_prop,
+            &self.unassigned_variables,
+        )
+    }
+
     pub fn new_with_pool_and_debug_writer<Writer: std::fmt::Write + 'static>(
         formula: Formula<Config::BitSet>,
         mut bitset_pool: Pool<Config::BitSet>,
@@ -536,6 +646,8 @@ impl<Config: ConfigT> State<Config> {
         let mut variables_bitset = Config::BitSet::create();
         variables_bitset.clear_all();
         let mut clauses_by_var = vec![];
+        let mut watched_clauses = vec![];
+        let mut ready_for_unit_prop = vec![];
 
         for var in vars {
             variables_bitset.set(var);
@@ -544,7 +656,12 @@ impl<Config: ConfigT> State<Config> {
         for _ in 0..num_vars {
             let mut bs = bitset_pool.acquire(|| Config::BitSet::create());
             bs.clear_all();
+            let mut first = bitset_pool.acquire(|| Config::BitSet::create());
+            first.clear_all();
+            let mut second = bitset_pool.acquire(|| Config::BitSet::create());
+            second.clear_all();
             clauses_by_var.push(bs);
+            watched_clauses.push(TfPair { first, second });
         }
 
         let mut instantly_unsat = false;
@@ -556,6 +673,13 @@ impl<Config: ConfigT> State<Config> {
             clause.iter_literals().for_each(|lit| {
                 clauses_by_var[lit.variable()].set(idx);
             });
+            Self::update_watch_literals_for_new_clause_helper(
+                clause,
+                idx,
+                &mut watched_clauses,
+                &mut ready_for_unit_prop,
+                &variables_bitset,
+            );
         }
         let immediate_result = if instantly_unsat {
             Some(SatResult::Unsat)
@@ -583,6 +707,7 @@ impl<Config: ConfigT> State<Config> {
         let unassigned_variables = variables_bitset;
         let rng = Pcg64::seed_from_u64(5);
         State {
+            ready_for_unit_prop,
             immediate_result,
             all_variables,
             assignments: Config::BitSet::create(),
@@ -590,12 +715,12 @@ impl<Config: ConfigT> State<Config> {
             trail: Vec::with_capacity(64),
             unassigned_variables,
             unsatisfied_clauses,
+            watched_clauses,
             clauses_by_var,
             trail_entry_idx_by_var: vec![None; num_vars],
             scratch_clause_bitset: Some(bitset_pool.acquire(|| Config::BitSet::create())),
             scratch_variable_bitset: Some(bitset_pool.acquire(|| Config::BitSet::create())),
             decision_level: 0,
-            next_literal: None,
             bitset_pool,
             iterations: 0,
             rng,
