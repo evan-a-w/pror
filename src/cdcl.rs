@@ -65,6 +65,7 @@ pub struct State<Config: ConfigT> {
     all_variables: Config::BitSet,
     assignments: Config::BitSet,
     clauses: Vec<Clause<Config::BitSet>>,
+    watched_clauses: Vec<Vec<ClauseIdx>>,
     trail: Vec<TrailEntry<Config::BitSet>>,
     unassigned_variables: Config::BitSet,
     unsatisfied_clauses: Config::BitSet,

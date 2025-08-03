@@ -84,7 +84,7 @@ fn useless_set_thing() {
 pub fn main() {
     wikipedia();
     long();
-    // fail_eg();
+    fail_eg();
     succ_eg();
     sudoku();
 }
