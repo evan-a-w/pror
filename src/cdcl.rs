@@ -95,7 +95,7 @@ pub struct State<Config: ConfigT> {
     assignments: Config::BitSet,
     clauses: Vec<Clause<Config::BitSet>>,
     watched_clauses: Vec<TfPair<Config::BitSet>>,
-    ready_for_unit_prop: Vec<(Literal, ClauseIdx)>,
+    ready_for_unit_prop: Config::BitSet,
     trail: Vec<TrailEntry<Config::BitSet>>,
     unassigned_variables: Config::BitSet,
     unsatisfied_clauses: Config::BitSet,
@@ -281,21 +281,28 @@ impl<Config: ConfigT> State<Config> {
                         && self.unassigned_variables.contains(lit.variable())
                 })
                 .next();
-            debug!(
-                self.debug_writer,
-                "updating watched clauses for literal {} in clause ({:?})",
-                literal.to_string(),
-                self.clause_string(ClauseIdx(clause_idx))
-            );
             match replace {
-                None => {
-                    let literal = self
-                        .try_get_unit_literal(&self.clauses[clause_idx])
-                        .unwrap();
-                    self.ready_for_unit_prop
-                        .push((literal, ClauseIdx(clause_idx)));
-                }
+                None => match self.try_get_unit_literal(&self.clauses[clause_idx]) {
+                    None => (),
+                    Some(unit_literal) => {
+                        // debug!(
+                        //     self.debug_writer,
+                        //     "found unit literal ({}) while updating watched clauses for literal {} in clause ({:?})",
+                        //     unit_literal.to_string(),
+                        //     literal.to_string(),
+                        //     self.clause_string(ClauseIdx(clause_idx)),
+                        // );
+                        self.ready_for_unit_prop.set(clause_idx);
+                    }
+                },
                 Some(to_replace) => {
+                    // debug!(
+                    //     self.debug_writer,
+                    //     "replacing watched literal {} with {} in clause ({:?})",
+                    //     literal.to_string(),
+                    //     to_replace.to_string(),
+                    //     self.clause_string(ClauseIdx(clause_idx))
+                    // );
                     self.watched_clauses_mut(literal).clear(clause_idx);
                     self.watched_clauses_mut(to_replace).set(clause_idx);
                 }
@@ -325,13 +332,19 @@ impl<Config: ConfigT> State<Config> {
         );
         self.trail_entry_idx_by_var[var] = Some(self.trail.len());
         self.unassigned_variables.clear(var);
-        trail_entry.satisfied_clauses = Some(self.satisfy_clauses(&trail_entry));
+        let satisfied_clauses = self.satisfy_clauses(&trail_entry);
+        self.unsatisfied_clauses.difference_with(&satisfied_clauses);
+        trail_entry.satisfied_clauses = Some(satisfied_clauses);
         self.trail.push(trail_entry);
+        self.update_watched_clauses(literal.negate());
     }
 
     fn unit_propagate_internal(&mut self) -> UnitPropagationResult {
-        if let Some((literal, clause_idx)) = self.ready_for_unit_prop.pop() {
-            self.with_unit_clause(literal, clause_idx)
+        if let Some(clause_idx) = self.ready_for_unit_prop.pop_first_set() {
+            match self.try_get_unit_literal(&self.clauses[clause_idx]) {
+                None => self.unit_propagate_internal(),
+                Some(literal) => self.with_unit_clause(literal, ClauseIdx(clause_idx)),
+            }
         } else {
             UnitPropagationResult::FinishedUnitPropagation
         }
@@ -348,9 +361,14 @@ impl<Config: ConfigT> State<Config> {
     ) -> UnitPropagationResult {
         debug!(
             self.debug_writer,
-            "found unit clause: {:?} in clause ({:?})",
+            "found unit clause: {:?} in clause ({:?})", // unit clauses rn: {}",
             literal,
-            self.clause_string(clause_idx)
+            self.clause_string(clause_idx),
+            // self.ready_for_unit_prop
+            //     .iter()
+            //     .map(|idx| self.clause_string(ClauseIdx(idx)))
+            //     .collect::<Vec<_>>()
+            //     .join("; ")
         );
         let decision_level = self.decision_level;
         let trail_entry = TrailEntry {
@@ -370,11 +388,11 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn unit_propagate(&mut self) -> UnitPropagationResult {
-        if self.ready_for_unit_prop.is_empty() {
-            return UnitPropagationResult::NothingToPropagate;
-        }
-        if let Some((literal, clause_idx)) = self.ready_for_unit_prop.pop() {
-            self.with_unit_clause(literal, clause_idx)
+        if let Some(clause_idx) = self.ready_for_unit_prop.pop_first_set() {
+            match self.try_get_unit_literal(&self.clauses[clause_idx]) {
+                None => self.unit_propagate(),
+                Some(literal) => self.with_unit_clause(literal, ClauseIdx(clause_idx)),
+            }
         } else {
             UnitPropagationResult::NothingToPropagate
         }
@@ -511,7 +529,7 @@ impl<Config: ConfigT> State<Config> {
         self.unsatisfied_clauses.set(self.clauses.len());
         self.remove_from_trail_helper(Some(remove_greater_than));
         self.clauses.push(learned_clause);
-        self.ready_for_unit_prop.clear();
+        self.ready_for_unit_prop.clear_all();
         self.update_watch_literals_for_new_clause(self.clauses.len() - 1);
     }
 
@@ -590,39 +608,74 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn update_watch_literals_for_new_clause_helper(
+        debug_writer: &Option<RefCell<Box<dyn std::fmt::Write>>>,
         clause: &Clause<Config::BitSet>,
         clause_idx: usize,
         watched_clauses: &mut Vec<TfPair<Config::BitSet>>,
-        ready_for_unit_prop: &mut Vec<(Literal, ClauseIdx)>,
+        ready_for_unit_prop: &mut Config::BitSet,
         unassigned_variables: &Config::BitSet,
     ) {
-        let mut lits = clause
-            .iter_literals()
-            .filter(|lit| unassigned_variables.contains(lit.variable()));
-        match (lits.next(), lits.next()) {
-            (None, None) => (),
-            (None, Some(lit)) | (Some(lit), None) => {
+        let mut unassigned_lits = clause
+            .variables
+            .iter_intersection(unassigned_variables)
+            .map(|var| Literal::new(var, !clause.negatives.contains(var)));
+        let mut assigned_lits = clause
+            .variables
+            .iter_difference(unassigned_variables)
+            .map(|var| Literal::new(var, !clause.negatives.contains(var)));
+        match (
+            unassigned_lits.next(),
+            unassigned_lits.next(),
+            assigned_lits.next(),
+            assigned_lits.next(),
+        ) {
+            (None, None, None, None) => (),
+            (None, None, Some(lit), None) => {
                 watched_clauses[lit.variable()][lit.value()].set(clause_idx);
-                let other = clause
-                    .iter_literals()
-                    .find(|lit2| lit.variable() != lit2.variable());
-                match other {
-                    None => (),
-                    Some(b) => {
-                        watched_clauses[b.variable()][b.value()].set(clause_idx);
-                    }
-                };
-                ready_for_unit_prop.push((lit, ClauseIdx(clause_idx)));
             }
-            (Some(a), Some(b)) => {
+            (None, None, Some(lit1), Some(lit2)) => {
+                watched_clauses[lit1.variable()][lit1.value()].set(clause_idx);
+                watched_clauses[lit2.variable()][lit2.value()].set(clause_idx);
+            }
+            (Some(lit), None, Some(lit2), _) => {
+                watched_clauses[lit.variable()][lit.value()].set(clause_idx);
+                watched_clauses[lit2.variable()][lit2.value()].set(clause_idx);
+                // debug!(
+                //     debug_writer,
+                //     "adding watched literal {} for unit clause ({:?})",
+                //     lit.to_string(),
+                //     clause.to_string()
+                // );
+                ready_for_unit_prop.set(clause_idx);
+            }
+            (Some(lit), None, None, None) => {
+                watched_clauses[lit.variable()][lit.value()].set(clause_idx);
+                // debug!(
+                //     debug_writer,
+                //     "adding watched literal {} for unit clause ({:?})",
+                //     lit.to_string(),
+                //     clause.to_string()
+                // );
+                ready_for_unit_prop.set(clause_idx);
+            }
+            (Some(a), Some(b), _, _) => {
+                // debug!(
+                //     debug_writer,
+                //     "adding watched literals {} and {} for clause ({:?})",
+                //     a.to_string(),
+                //     b.to_string(),
+                //     clause.to_string()
+                // );
                 watched_clauses[a.variable()][a.value()].set(clause_idx);
                 watched_clauses[b.variable()][b.value()].set(clause_idx);
             }
+            _ => assert!(false),
         };
     }
 
     fn update_watch_literals_for_new_clause(&mut self, clause_idx: usize) {
         Self::update_watch_literals_for_new_clause_helper(
+            &self.debug_writer,
             &self.clauses[clause_idx],
             clause_idx,
             &mut self.watched_clauses,
@@ -647,7 +700,7 @@ impl<Config: ConfigT> State<Config> {
         variables_bitset.clear_all();
         let mut clauses_by_var = vec![];
         let mut watched_clauses = vec![];
-        let mut ready_for_unit_prop = vec![];
+        let mut ready_for_unit_prop = Config::BitSet::create();
 
         for var in vars {
             variables_bitset.set(var);
@@ -666,6 +719,14 @@ impl<Config: ConfigT> State<Config> {
 
         let mut instantly_unsat = false;
 
+        let debug_writer = match debug_writer {
+            None => None,
+            Some(w) => {
+                let b: Box<dyn std::fmt::Write> = Box::new(w);
+                Some(RefCell::new(b))
+            }
+        };
+
         for (idx, clause) in clauses.iter().enumerate() {
             if clause.variables.is_empty() {
                 instantly_unsat = true;
@@ -674,6 +735,7 @@ impl<Config: ConfigT> State<Config> {
                 clauses_by_var[lit.variable()].set(idx);
             });
             Self::update_watch_literals_for_new_clause_helper(
+                &debug_writer,
                 clause,
                 idx,
                 &mut watched_clauses,
@@ -687,13 +749,6 @@ impl<Config: ConfigT> State<Config> {
             Some(SatResult::Sat(BTreeMap::new()))
         } else {
             None
-        };
-        let debug_writer = match debug_writer {
-            None => None,
-            Some(w) => {
-                let b: Box<dyn std::fmt::Write> = Box::new(w);
-                Some(RefCell::new(b))
-            }
         };
         let mut unsatisfied_clauses = Config::BitSet::create();
         unsatisfied_clauses.set_between(0, clauses.len());

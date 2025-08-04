@@ -37,6 +37,11 @@ pub trait BitSetT {
     /// In-place difference: `self &= !other`.
     fn difference_with(&mut self, other: &Self);
 
+    fn pop_first_set(&mut self) -> Option<usize> {
+        let res = self.first_set()?;
+        self.clear(res);
+        Some(res)
+    }
     fn intersect(&mut self, a: &Self, b: &Self);
 
     fn nth(&self, n: usize) -> Option<usize>;
