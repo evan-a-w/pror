@@ -554,6 +554,20 @@ mod tests {
         assert!(matches!(result, SatResult::Sat(_)));
     }
 
+    #[test]
+    fn succ_factor() {
+        let formula = dimacs::read_string(dimacs::FACTOR_1234321);
+        let result = Default::solve(formula);
+        assert!(matches!(result, SatResult::Sat(_)));
+    }
+
+    // #[test]
+    // fn fail_factor() {
+    //     let formula = dimacs::read_string(dimacs::FACTOR_1235321);
+    //     let result = Default::solve(formula);
+    //     assert!(matches!(result, SatResult::Unsat));
+    // }
+
     // #[test]
     // fn fail_dnf() {
     //     let formula = dimacs::read_string(dimacs::FAIL_EG);

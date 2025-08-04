@@ -1,5 +1,8 @@
 use crate::bitset::BitSetT;
+use crate::pool::*;
+use std::collections::BTreeMap;
 use std::iter;
+use std::mem::MaybeUninit;
 
 /// A storage of fixed‐size blocks of `usize`.
 /// The bitset treats each block as `N * usize::BITS` bits.
@@ -10,8 +13,11 @@ pub trait BlockStorage<const N: usize>: Sized {
     fn block_count(&self) -> usize;
     /// Shared access to the `i`th `[usize; N]` block.
     fn block(&self, i: usize) -> &[usize; N];
-    /// Mutable access to the `i`th `[usize; N]` block.
-    fn block_mut(&mut self, i: usize) -> &mut [usize; N];
+
+    fn get_idx(&self, b: usize, i: usize) -> usize {
+        self.block(b)[i]
+    }
+    fn set_idx(&mut self, b: usize, i: usize, with: usize);
 
     fn resize(&mut self, blocks: usize);
 
@@ -65,8 +71,8 @@ where
         self.extend(std::iter::repeat([0; N]).take(blocks - self.block_count()));
     }
 
-    fn block_mut(&mut self, i: usize) -> &mut [usize; N] {
-        &mut self.as_mut()[i]
+    fn set_idx(&mut self, b: usize, i: usize, with: usize) {
+        self.as_mut()[b][i] = with;
     }
 
     fn first_set_block_ge(&self, start: usize) -> Option<usize> {
@@ -125,7 +131,8 @@ where
     pub fn set(&mut self, bit: usize) {
         self.grow(bit + 1);
         let (b, w, o) = Self::locate(bit);
-        self.storage.block_mut(b)[w] |= 1 << o;
+        self.storage
+            .set_idx(b, w, self.storage.get_idx(b, w) | (1 << o));
     }
 
     /// Clear a bit to 0 (no grow).
@@ -134,14 +141,14 @@ where
             return;
         }
         let (b, w, o) = Self::locate(bit);
-        self.storage.block_mut(b)[w] &= !(1 << o);
+        self.storage
+            .set_idx(b, w, self.storage.get_idx(b, w) & !(1 << o));
     }
 
     pub fn clear_all(&mut self) {
         for b in 0..self.storage.block_count() {
-            let blk = self.storage.block_mut(b);
-            for w in blk.iter_mut() {
-                *w = 0;
+            for i in 0..N {
+                self.storage.set_idx(b, i, 0);
             }
         }
     }
@@ -247,10 +254,9 @@ where
     pub fn union_with(&mut self, other: &Self) {
         self.grow(other.capacity());
         for b in 0..self.storage.block_count().min(other.storage.block_count()) {
-            let me = self.storage.block_mut(b);
             let them = other.storage.block(b);
-            for (a, &bb) in me.iter_mut().zip(them.iter()) {
-                *a |= bb;
+            for (i, &bb) in (0..N).zip(them.iter()) {
+                self.storage.set_idx(b, i, self.storage.get_idx(b, i) | bb);
             }
         }
     }
@@ -259,16 +265,14 @@ where
     pub fn intersect_with(&mut self, other: &Self) {
         let min = self.storage.block_count().min(other.storage.block_count());
         for b in 0..min {
-            let me = self.storage.block_mut(b);
             let them = other.storage.block(b);
-            for (a, &bb) in me.iter_mut().zip(them.iter()) {
-                *a &= bb;
+            for (i, &bb) in (0..N).zip(them.iter()) {
+                self.storage.set_idx(b, i, self.storage.get_idx(b, i) & bb);
             }
         }
         for b in min..(self.storage.block_count()) {
-            let me = self.storage.block_mut(b);
-            for a in me.iter_mut() {
-                *a = 0; // Clear the rest of the blocks.
+            for i in 0..N {
+                self.storage.set_idx(b, i, 0);
             }
         }
     }
@@ -276,10 +280,9 @@ where
     /// Difference: no grow.
     pub fn difference_with(&mut self, other: &Self) {
         for b in 0..self.storage.block_count().min(other.storage.block_count()) {
-            let me = self.storage.block_mut(b);
             let them = other.storage.block(b);
-            for (a, &bb) in me.iter_mut().zip(them.iter()) {
-                *a &= !bb;
+            for (i, &bb) in (0..N).zip(them.iter()) {
+                self.storage.set_idx(b, i, self.storage.get_idx(b, i) & !bb);
             }
         }
     }
@@ -369,26 +372,31 @@ where
     pub fn intersect(&mut self, aset: &Self, bset: &Self) {
         let cap = aset.capacity().max(bset.capacity());
         if self.capacity() > cap {
-            for i in (cap / Self::BITS_PER_BLOCK)..(self.capacity() / Self::BITS_PER_BLOCK) {
-                self.storage.block_mut(i).fill(0);
+            // clear extra blocks beyond cap
+            let start_blk = cap / Self::BITS_PER_BLOCK;
+            let end_blk = self.storage.block_count();
+            for b in start_blk..end_blk {
+                for wi in 0..N {
+                    self.storage.set_idx(b, wi, 0);
+                }
             }
         } else {
-            self.grow(aset.capacity().max(bset.capacity()));
+            self.grow(cap);
         }
-        for bl in 0..aset.storage.block_count().min(bset.storage.block_count()) {
-            let me = self.storage.block_mut(bl);
-            let a = aset.storage.block(bl);
-            let b = bset.storage.block(bl);
-            for ((m, &bb), &aa) in me.iter_mut().zip(a.iter()).zip(b.iter()) {
-                *m = bb & aa;
+
+        let min_blocks = aset.storage.block_count().min(bset.storage.block_count());
+        for bl in 0..min_blocks {
+            for wi in 0..N {
+                let a_word = aset.storage.get_idx(bl, wi);
+                let b_word = bset.storage.get_idx(bl, wi);
+                self.storage.set_idx(bl, wi, a_word & b_word);
             }
         }
-        for b in (aset.storage.block_count().min(bset.storage.block_count()) + 1)
-            ..self.storage.block_count()
-        {
-            let me = self.storage.block_mut(b);
-            for a in me.iter_mut() {
-                *a = 0; // Clear the rest of the blocks.
+
+        // clear any remaining blocks (if any) between min_blocks and current capacity
+        for b in (min_blocks)..self.storage.block_count() {
+            for wi in 0..N {
+                self.storage.set_idx(b, wi, 0);
             }
         }
     }
@@ -400,39 +408,47 @@ where
         self.grow(end);
         let (start_b, start_w, start_o) = Self::locate(start);
         let (end_b, end_w, end_o) = Self::locate(end - 1);
+
         if start_b == end_b {
-            let blk = self.storage.block_mut(start_b);
             let left = !0usize << start_o;
             let right = if end_o + 1 == usize::BITS as usize {
                 !0usize
             } else {
                 (1usize << (end_o + 1)) - 1
             };
-            blk[start_w] |= left & right;
+            let prev = self.storage.get_idx(start_b, start_w);
+            self.storage
+                .set_idx(start_b, start_w, prev | (left & right));
         } else {
-            let blk = self.storage.block_mut(start_b);
-            blk[start_w] |= !0usize << start_o;
+            // start block: from start_o to end of word
+            let prev_start = self.storage.get_idx(start_b, start_w);
+            self.storage
+                .set_idx(start_b, start_w, prev_start | (!0usize << start_o));
             for wi in (start_w + 1)..N {
-                blk[wi] = !0usize;
+                self.storage.set_idx(start_b, wi, !0usize);
             }
+
+            // full blocks between
             for b in (start_b + 1)..end_b {
-                let blk = self.storage.block_mut(b);
                 for wi in 0..N {
-                    blk[wi] = !0usize;
+                    self.storage.set_idx(b, wi, !0usize);
                 }
             }
-            let blk = self.storage.block_mut(end_b);
+
+            // end block: from 0 to end_o
             for wi in 0..end_w {
-                blk[wi] = !0usize;
+                self.storage.set_idx(end_b, wi, !0usize);
             }
             let mask = if end_o + 1 == usize::BITS as usize {
                 !0usize
             } else {
                 (1usize << (end_o + 1)) - 1
             };
-            blk[end_w] |= mask;
+            let prev_end = self.storage.get_idx(end_b, end_w);
+            self.storage.set_idx(end_b, end_w, prev_end | mask);
         }
     }
+
     pub fn count(&self) -> usize {
         let mut acc = 0;
         for b in 0..self.storage.block_count() {
@@ -473,7 +489,7 @@ where
 
 impl<S, const N: usize> BitSetT for BitSet<S, N>
 where
-    S: BlockStorage<N> + Extend<[usize; N]> + Clone,
+    S: BlockStorage<N> + Clone,
 {
     fn grow(&mut self, bits: usize) {
         self.grow(bits);
@@ -550,3 +566,179 @@ where
 }
 
 pub type DefaultBitSet = BitSet<Vec<[usize; 1]>, 1>;
+pub type DefaultMapBitSet = BitSet<BTreeMapStorage<32>, 32>;
+
+/// Storage where blocks are kept sparsely, but capacity is explicit.
+/// Blocks that are all-zero are not stored; when a stored block becomes all-zero it's evicted.
+pub struct BTreeMapStorage<const N: usize> {
+    map: BTreeMap<usize, Box<[usize; N]>>,
+    pool: Pool<Box<[usize; N]>>,
+    capacity: usize,             // number of blocks of addressable space
+    zero_block: Box<[usize; N]>, // shared all-zero block for reads
+}
+
+impl<const N: usize> Clone for BTreeMapStorage<N> {
+    fn clone(&self) -> Self {
+        BTreeMapStorage {
+            map: self.map.clone(),
+            pool: Pool::new(), // Pool is not cloned; it will be empty in the clone.
+            capacity: self.capacity,
+            zero_block: self.zero_block.clone(),
+        }
+    }
+}
+
+impl<const N: usize> BTreeMapStorage<N> {
+    fn make_zeroed_block() -> Box<[usize; N]> {
+        Box::new([0; N])
+    }
+
+    /// Helper to test if a block is all ones.
+    fn is_full_block(block: &[usize; N]) -> bool {
+        block.iter().all(|&w| w == usize::MAX)
+    }
+
+    /// Helper to test if a block is all zero.
+    fn is_zero_block(block: &[usize; N]) -> bool {
+        block.iter().all(|&w| w == 0)
+    }
+
+    /// Get mutable block, creating if missing (with zero contents).
+    fn get_or_create_block(&mut self, index: usize) -> &mut [usize; N] {
+        if index >= self.capacity {
+            panic!(
+                "Index {} out of capacity {}: must resize before accessing beyond capacity",
+                index, self.capacity
+            );
+        }
+        if !self.map.contains_key(&index) {
+            let mut block = self.pool.acquire(|| Self::make_zeroed_block());
+            self.map.insert(index, block);
+        }
+        self.map.get_mut(&index).map(|b| &mut **b).unwrap()
+    }
+
+    /// Possibly remove block if it became all zero, returning it to pool.
+    fn drop_if_zero(&mut self, index: usize) {
+        if let Some(block) = self.map.get(&index) {
+            if Self::is_zero_block(block) {
+                let block = self.map.remove(&index).unwrap();
+                self.pool.release(block);
+            }
+        }
+    }
+}
+
+impl<const N: usize> Default for BTreeMapStorage<N> {
+    fn default() -> Self {
+        BTreeMapStorage {
+            map: BTreeMap::new(),
+            pool: Pool::new(),
+            capacity: 0,
+            zero_block: Self::make_zeroed_block(),
+        }
+    }
+}
+
+impl<const N: usize> BlockStorage<N> for BTreeMapStorage<N> {
+    fn with_capacity(blocks: usize) -> Self {
+        BTreeMapStorage {
+            map: BTreeMap::new(),
+            pool: Pool::new(),
+            capacity: blocks,
+            zero_block: Self::make_zeroed_block(),
+        }
+    }
+
+    fn block_count(&self) -> usize {
+        self.capacity
+    }
+
+    fn block(&self, i: usize) -> &[usize; N] {
+        if i >= self.capacity {
+            panic!("Accessing block {} beyond capacity {}", i, self.capacity);
+        }
+        self.map
+            .get(&i)
+            .map(|b| &**b)
+            .unwrap_or_else(|| &*self.zero_block)
+    }
+
+    fn set_idx(&mut self, b: usize, i: usize, with: usize) {
+        if b >= self.capacity {
+            panic!(
+                "Setting index in block {} beyond capacity {}: call resize first",
+                b, self.capacity
+            );
+        }
+        let block = self.get_or_create_block(b);
+        block[i] = with;
+        if Self::is_zero_block(block) {
+            self.drop_if_zero(b);
+        }
+    }
+
+    fn resize(&mut self, blocks: usize) {
+        if blocks > self.capacity {
+            self.capacity = blocks;
+        }
+        // shrinking is a no-op; capacity only increases. Stored blocks beyond new capacity
+        // are not removed to avoid unexpected data loss.
+    }
+
+    fn first_set_block_ge(&self, start: usize) -> Option<usize> {
+        if start >= self.capacity {
+            return None;
+        }
+        // find first stored block >= start that has any nonzero word
+        self.map
+            .range(start..self.capacity)
+            .find_map(|(&idx, block)| {
+                if !Self::is_zero_block(block) {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+    }
+
+    fn first_unset_block_ge(&self, start: usize) -> Option<usize> {
+        if start >= self.capacity {
+            return None;
+        }
+
+        // If a block is missing, it's all zero => has unset bits.
+        if !self.map.contains_key(&start) {
+            return Some(start);
+        }
+
+        // If present and not full, it has unset bits.
+        if let Some(block) = self.map.get(&start) {
+            if !Self::is_full_block(block) {
+                return Some(start);
+            }
+        }
+
+        // Scan forward within capacity.
+        let mut prev = start;
+        // iterate over stored blocks >= start+1
+        for (&idx, block) in self.map.range((start + 1)..self.capacity) {
+            if idx > prev + 1 {
+                // gap: implicit zero block
+                return Some(prev + 1);
+            }
+            if !Self::is_full_block(block) {
+                return Some(idx);
+            }
+            prev = idx;
+        }
+
+        // If we haven't exhausted capacity, the next after last considered (if < capacity) is a zero gap.
+        if prev + 1 < self.capacity {
+            return Some(prev + 1);
+        }
+
+        // No unset block found.
+        None
+    }
+}

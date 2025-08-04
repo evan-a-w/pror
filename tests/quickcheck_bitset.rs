@@ -390,3 +390,193 @@ fn qc_intersect_first_set(
 
     TestResult::passed()
 }
+
+
+#[quickcheck]
+fn qc_map_prop_bitset_matches_naive(initial_state: BoundedVec<1024>, ops: Ops) -> TestResult {
+    let mut b = DefaultMapBitSet::create();
+    let mut naive = BTreeBitSet::create();
+    initial_state.0.iter().for_each(|&i| {
+        b.set(i);
+        naive.set(i);
+    });
+
+    for op in &ops.ops {
+        let res = apply(&mut b, op);
+        let res_naive = apply(&mut naive, op);
+        if res != res_naive {
+            println!(
+                "Failed on op: {:?}\ngood: {:?} ({:?})\nnaive: {:?} ({:?})",
+                op,
+                res,
+                b.iter().collect::<Vec<usize>>(),
+                res_naive,
+                naive.iter().collect::<Vec<usize>>()
+            );
+            return TestResult::failed();
+        }
+    }
+
+    TestResult::passed()
+}
+
+#[quickcheck]
+fn qc_map_prop_bitset_matches_naive2(
+    initial_state_a: BoundedVec<1024>,
+    initial_state_b: BoundedVec<1024>,
+    ops: BinOps,
+) -> TestResult {
+    let mut a = DefaultMapBitSet::create();
+    let mut b = DefaultMapBitSet::create();
+    let mut naive_a = BTreeBitSet::create();
+    let mut naive_b = BTreeBitSet::create();
+
+    initial_state_a.0.iter().for_each(|&i| {
+        a.set(i);
+        naive_a.set(i)
+    });
+    initial_state_b.0.iter().for_each(|&i| {
+        b.set(i);
+        naive_b.set(i)
+    });
+
+    for op in &ops.ops {
+        let res = apply2(&mut a, &mut b, op);
+        let res_naive = apply2(&mut naive_a, &mut naive_b, op);
+        let la = a.iter().collect::<Vec<usize>>();
+        let lb = b.iter().collect::<Vec<usize>>();
+
+        let la_naive = naive_a.iter().collect::<Vec<usize>>();
+        let lb_naive = naive_b.iter().collect::<Vec<usize>>();
+        if res != res_naive || la != la_naive || lb != lb_naive {
+            println!(
+                "Failed on op: {:?}\ngood: {:?} ({:?}; {:?})\nnaive: {:?} ({:?}; {:?})",
+                op, res, la, lb, res_naive, la_naive, lb_naive
+            );
+            return TestResult::failed();
+        }
+    }
+
+    TestResult::passed()
+}
+
+#[quickcheck]
+fn qc_map_intersect_first_set_ge(
+    initial_state_a: BoundedVec<1024>,
+    initial_state_b: BoundedVec<1024>,
+    i: usize,
+) -> TestResult {
+    let mut a = DefaultMapBitSet::create();
+    let mut b = DefaultMapBitSet::create();
+    let mut naive_a = BTreeBitSet::create();
+    let mut naive_b = BTreeBitSet::create();
+
+    initial_state_a.0.iter().for_each(|&i| {
+        a.set(i);
+        naive_a.set(i)
+    });
+    initial_state_b.0.iter().for_each(|&i| {
+        b.set(i);
+        naive_b.set(i)
+    });
+
+    let max_a = initial_state_a.0.iter().max().copied().unwrap_or(0);
+    let max_b = initial_state_b.0.iter().max().copied().unwrap_or(0);
+    let ge = if max_a.max(max_b) == 0 {
+        0
+    } else {
+        i % max_a.max(max_b)
+    };
+
+    let res = a.intersect_first_set_ge(&b, ge);
+    let naive_res = naive_a.intersect_first_set_ge(&naive_b, ge);
+    if res != naive_res {
+        println!(
+            "Failed on intersect_first_set_ge with ge: {}\n\
+             good: {:?} ({:?})\n\
+             naive: {:?} ({:?})",
+            ge,
+            res,
+            a.iter().collect::<Vec<usize>>(),
+            naive_res,
+            naive_a.iter().collect::<Vec<usize>>()
+        );
+        return TestResult::failed();
+    }
+
+    TestResult::passed()
+}
+
+#[quickcheck]
+fn qc_map_iter_difference(
+    initial_state_a: BoundedVec<1024>,
+    initial_state_b: BoundedVec<1024>,
+) -> TestResult {
+    let mut a = DefaultMapBitSet::create();
+    let mut b = DefaultMapBitSet::create();
+    let mut naive_a = BTreeBitSet::create();
+    let mut naive_b = BTreeBitSet::create();
+
+    initial_state_a.0.iter().for_each(|&i| {
+        a.set(i);
+        naive_a.set(i)
+    });
+    initial_state_b.0.iter().for_each(|&i| {
+        b.set(i);
+        naive_b.set(i)
+    });
+
+    let res = a.iter_difference(&b).collect::<Vec<usize>>();
+    let naive_res = naive_a.iter_difference(&naive_b).collect::<Vec<usize>>();
+    if res != naive_res {
+        println!(
+            "Failed on intersect_first_set\n\
+             good: {:?} ({:?})\n\
+             naive: {:?} ({:?})",
+            res,
+            a.iter().collect::<Vec<usize>>(),
+            naive_res,
+            naive_a.iter().collect::<Vec<usize>>()
+        );
+        return TestResult::failed();
+    }
+
+    TestResult::passed()
+}
+
+#[quickcheck]
+fn qc_map_intersect_first_set(
+    initial_state_a: BoundedVec<1024>,
+    initial_state_b: BoundedVec<1024>,
+) -> TestResult {
+    let mut a = DefaultMapBitSet::create();
+    let mut b = DefaultMapBitSet::create();
+    let mut naive_a = BTreeBitSet::create();
+    let mut naive_b = BTreeBitSet::create();
+
+    initial_state_a.0.iter().for_each(|&i| {
+        a.set(i);
+        naive_a.set(i)
+    });
+    initial_state_b.0.iter().for_each(|&i| {
+        b.set(i);
+        naive_b.set(i)
+    });
+
+    let res = a.intersect_first_set(&b);
+    let naive_res = naive_a.intersect_first_set(&naive_b);
+    if res != naive_res {
+        println!(
+            "Failed on intersect_first_set\n\
+             good: {:?} ({:?})\n\
+             naive: {:?} ({:?})",
+            res,
+            a.iter().collect::<Vec<usize>>(),
+            naive_res,
+            naive_a.iter().collect::<Vec<usize>>()
+        );
+        return TestResult::failed();
+    }
+
+    TestResult::passed()
+}

@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub struct Pool<T> {
     free: Vec<T>,
 }
