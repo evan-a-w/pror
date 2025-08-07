@@ -45,6 +45,11 @@ impl<BitSet: BitSetT> Clause<BitSet> {
         }
     }
 
+    pub fn contains(&self, literal: Literal) -> bool {
+        let var = literal.variable();
+        self.variables.contains(var) && (self.negatives.contains(var) != literal.value())
+    }
+
     pub fn to_string(&self) -> String {
         format!(
             "({})",
