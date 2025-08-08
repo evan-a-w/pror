@@ -224,7 +224,7 @@ pub fn main() {
     // simple();
 
     factor_sat_eg();
-    factor_unsat_eg();
+    // factor_unsat_eg();
 
     // fail_eg();
 }
