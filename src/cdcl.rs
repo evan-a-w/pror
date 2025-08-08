@@ -481,18 +481,8 @@ impl<Config: ConfigT> State<Config> {
                     decision_level: self.decision_level,
                     reason: Reason::Decision(literal),
                 };
-                if let Some(failed_idx) = self.add_to_trail(trail_entry) {
-                    // ignore
-                    // self.react(Action::Contradiction(failed_idx.0))
-                    debug!(
-                        self.debug_writer,
-                        "found contradiction in choice for literal {}",
-                        literal.to_string()
-                    );
-                    StepResult::Continue
-                } else {
-                    StepResult::Continue
-                }
+                self.add_to_trail(trail_entry);
+                StepResult::Continue
             }
             Action::Contradiction(_) if self.decision_level == 0 => {
                 StepResult::Done(SatResult::Unsat)
