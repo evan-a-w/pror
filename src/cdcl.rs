@@ -90,6 +90,7 @@ pub struct State<Config: ConfigT> {
     ready_for_unit_prop: Config::BitSet,
     trail: Vec<TrailEntry>,
     unassigned_variables: Config::BitSet,
+    num_initial_clauses: usize,
     clauses_by_var: Vec<Config::BitSet>,
     trail_entry_idx_by_var: Vec<Option<usize>>,
     scratch_clause_bitset: Option<Config::BitSet>,
@@ -177,6 +178,10 @@ impl<Config: ConfigT> State<Config> {
         self.trail_entry_idx_by_var[trail_entry.literal.variable()] = None;
         self.unassigned_variables
             .set(trail_entry.literal.variable());
+        match trail_entry.reason {
+            Reason::Decision(_) => (),
+            Reason::ClauseIdx(clause_idx) => self.clauses[clause_idx].num_units -= 1,
+        };
     }
 
     fn acquire_bitset(&mut self) -> Config::BitSet {
@@ -268,6 +273,10 @@ impl<Config: ConfigT> State<Config> {
             var,
             self.trail_entry_idx_by_var[var]
         );
+        match trail_entry.reason {
+            Reason::Decision(_) => (),
+            Reason::ClauseIdx(clause_idx) => self.clauses[clause_idx].num_units += 1,
+        };
         self.trail_entry_idx_by_var[var] = Some(self.trail.len());
         self.unassigned_variables.clear(var);
         self.trail.push(trail_entry);
@@ -500,8 +509,15 @@ impl<Config: ConfigT> State<Config> {
         }
     }
 
+    fn simplify_clauses(&mut self) {
+        let num_added_clauses = self.clauses.len() - self.num_initial_clauses;
+    }
+
     pub fn step(&mut self, literal_override: Option<Literal>) -> StepResult {
         self.iterations += 1;
+        if self.iterations % 100 == 0 {
+            self.simplify_clauses();
+        };
         if let Some(res) = self.immediate_result.take() {
             return StepResult::Done(res);
         }
@@ -680,6 +696,7 @@ impl<Config: ConfigT> State<Config> {
             all_variables,
             assignments: Config::BitSet::create(),
             clauses,
+            num_initial_clauses: clauses.len(),
             trail: Vec::with_capacity(64),
             unassigned_variables,
             watched_clauses,

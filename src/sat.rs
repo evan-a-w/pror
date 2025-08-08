@@ -19,6 +19,7 @@ pub struct Clause<BitSet: BitSetT> {
     pub variables: BitSet,
     pub negatives: BitSet,
     pub tautology: bool,
+    pub num_units: usize,
 }
 
 pub fn satisfies<BitSet: BitSetT>(
@@ -42,6 +43,7 @@ impl<BitSet: BitSetT> Clause<BitSet> {
             variables,
             negatives,
             tautology: false,
+            num_units: 0,
         }
     }
 
