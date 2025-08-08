@@ -184,7 +184,7 @@ fn succ_eg() {
 
 fn fail_eg() {
     let formula = dimacs::read_string(dimacs::FAIL_EG);
-    let res = DefaultDebug::solve(formula);
+    let res = Default::solve(formula);
     println! {"res: {:?}", res};
 }
 
@@ -196,7 +196,7 @@ fn factor_sat_eg() {
 
 fn factor_unsat_eg() {
     let formula = dimacs::read_string(dimacs::FACTOR_1235321);
-    let res = DefaultDebug::solve(formula);
+    let res = Default::solve(formula);
     println! {"res: {:?}", res};
 }
 
@@ -214,7 +214,7 @@ fn useless_set_thing() {
 }
 
 pub fn main() {
-    stepped1();
+    // stepped1();
     // stepped3();
 
     // wikipedia();
@@ -223,8 +223,8 @@ pub fn main() {
     // sudoku();
     // simple();
 
-    // factor_sat_eg();
-    // factor_unsat_eg();
+    factor_sat_eg();
+    factor_unsat_eg();
 
     // fail_eg();
 }
