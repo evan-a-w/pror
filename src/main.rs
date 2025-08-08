@@ -36,16 +36,18 @@ fn stepped1() {
         vec![-1, -5, 6],
     ];
 
-    let mut solver = DefaultDebug::new_from_vec(formula);
-    step_and_print(&mut solver, Some(Literal::new(1, false)));
-    step_and_print(&mut solver, Some(Literal::new(2, false)));
-    step_and_print(&mut solver, Some(Literal::new(2, false)));
-    step_and_print(&mut solver, None);
-    step_and_print(&mut solver, None);
-    step_and_print(&mut solver, None);
-    step_and_print(&mut solver, Some(Literal::new(5, false)));
-    step_and_print(&mut solver, None);
-    step_and_print(&mut solver, None);
+    // let mut solver = DefaultDebug::new_from_vec(formula);
+    // step_and_print(&mut solver, Some(Literal::new(1, false)));
+    // step_and_print(&mut solver, Some(Literal::new(2, false)));
+    // step_and_print(&mut solver, Some(Literal::new(2, false)));
+    // step_and_print(&mut solver, None);
+    // step_and_print(&mut solver, None);
+    // step_and_print(&mut solver, None);
+    // step_and_print(&mut solver, Some(Literal::new(5, false)));
+    // step_and_print(&mut solver, None);
+    // step_and_print(&mut solver, None);
+    let res = DefaultDebug::solve(formula);
+    println! {"res: {:?}", res};
 }
 
 fn stepped3() {

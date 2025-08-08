@@ -207,9 +207,7 @@ impl<Config: ConfigT> State<Config> {
         while let Some(clause_idx) = next {
             next = self.watched_clauses(literal).first_set_ge(clause_idx + 1);
 
-            if self.is_satisfied(&self.clauses[clause_idx])
-                || self.clauses[clause_idx].contains(literal.negate())
-            {
+            if self.is_satisfied(&self.clauses[clause_idx]) {
                 continue;
             }
 
@@ -258,23 +256,20 @@ impl<Config: ConfigT> State<Config> {
             trail_entry.literal.to_string()
         );
         let literal = trail_entry.literal;
-        match self.update_watched_clauses(literal) {
-            None => (),
-            res => {
-                debug!(
-                    self.debug_writer,
-                    "found contradiction while updating watched clauses for literal {}: {:?}",
-                    literal.to_string(),
-                    res
-                );
-                return res;
-            }
-        };
         let var = literal.variable();
         if literal.value() {
             self.assignments.set(var);
         } else {
             self.assignments.clear(var);
+        }
+        let res = self.update_watched_clauses(literal);
+        if let Some(ClauseIdx(clause_idx)) = res {
+            debug!(
+                self.debug_writer,
+                "found contradiction while updating watched clauses for literal {} in clause {}",
+                literal.to_string(),
+                clause_idx,
+            );
         }
         assert!(
             self.trail_entry_idx_by_var[var].is_none(),
@@ -285,7 +280,7 @@ impl<Config: ConfigT> State<Config> {
         self.trail_entry_idx_by_var[var] = Some(self.trail.len());
         self.unassigned_variables.clear(var);
         self.trail.push(trail_entry);
-        None
+        res
     }
 
     fn unit_propagate_internal(&mut self) -> UnitPropagationResult {
@@ -310,14 +305,14 @@ impl<Config: ConfigT> State<Config> {
     ) -> UnitPropagationResult {
         debug!(
             self.debug_writer,
-            "found unit clause: {:?} in clause ({:?})", // unit clauses rn: {}",
+            "found unit clause: {:?} in clause ({:?}) unit clauses rn: {}",
             literal,
             self.clause_string(clause_idx),
-            // self.ready_for_unit_prop
-            //     .iter()
-            //     .map(|idx| self.clause_string(ClauseIdx(idx)))
-            //     .collect::<Vec<_>>()
-            //     .join("; ")
+            self.ready_for_unit_prop
+                .iter()
+                .map(|idx| self.clause_string(ClauseIdx(idx)))
+                .collect::<Vec<_>>()
+                .join("; ")
         );
         let decision_level = self.decision_level;
         let trail_entry = TrailEntry {
@@ -489,6 +484,11 @@ impl<Config: ConfigT> State<Config> {
                 if let Some(failed_idx) = self.add_to_trail(trail_entry) {
                     // ignore
                     // self.react(Action::Contradiction(failed_idx.0))
+                    debug!(
+                        self.debug_writer,
+                        "found contradiction in choice for literal {}",
+                        literal.to_string()
+                    );
                     StepResult::Continue
                 } else {
                     StepResult::Continue
