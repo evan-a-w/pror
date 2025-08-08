@@ -262,15 +262,6 @@ impl<Config: ConfigT> State<Config> {
         } else {
             self.assignments.clear(var);
         }
-        let res = self.update_watched_clauses(literal);
-        if let Some(ClauseIdx(clause_idx)) = res {
-            debug!(
-                self.debug_writer,
-                "found contradiction while updating watched clauses for literal {} in clause {}",
-                literal.to_string(),
-                clause_idx,
-            );
-        }
         assert!(
             self.trail_entry_idx_by_var[var].is_none(),
             "trail entry for var {} already exists: {:?}",
@@ -280,7 +271,7 @@ impl<Config: ConfigT> State<Config> {
         self.trail_entry_idx_by_var[var] = Some(self.trail.len());
         self.unassigned_variables.clear(var);
         self.trail.push(trail_entry);
-        res
+        self.update_watched_clauses(literal)
     }
 
     fn unit_propagate_internal(&mut self) -> UnitPropagationResult {
