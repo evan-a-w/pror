@@ -50,13 +50,6 @@ struct TrailEntry {
     literal: Literal,
     decision_level: usize,
     reason: Reason,
-    pub continue_: bool,
-}
-
-impl TrailEntry {
-    pub fn is_from_decision_point(&self) -> bool {
-        matches!(self.reason, Reason::Decision(_))
-    }
 }
 
 struct TfPair<T> {
@@ -125,7 +118,7 @@ enum UnitPropagationResult {
 enum Action {
     Unsat,
     FinishedUnitPropagation,
-    Continue(Literal, bool),
+    Continue(Literal),
     Contradiction(usize),
 }
 
@@ -203,13 +196,19 @@ impl<Config: ConfigT> State<Config> {
         })
     }
 
-    fn update_watched_clauses(&mut self, literal: Literal) -> Option<ClauseIdx> {
+    fn update_watched_clauses(&mut self, set_literal: Literal) -> Option<ClauseIdx> {
+        debug!(
+            self.debug_writer,
+            "updating watched clauses for literal {}",
+            set_literal.to_string()
+        );
+        let literal = set_literal.negate();
         let mut next = self.watched_clauses(literal).first_set();
         while let Some(clause_idx) = next {
             next = self.watched_clauses(literal).first_set_ge(clause_idx + 1);
 
             if self.is_satisfied(&self.clauses[clause_idx])
-                || self.clauses[clause_idx].contains(literal)
+                || self.clauses[clause_idx].contains(literal.negate())
             {
                 continue;
             }
@@ -224,25 +223,25 @@ impl<Config: ConfigT> State<Config> {
             match replace {
                 None => match self.try_get_unit_literal(&self.clauses[clause_idx]) {
                     None => return Some(ClauseIdx(clause_idx)),
-                    Some(_unit_literal) => {
-                        // debug!(
-                        //     self.debug_writer,
-                        //     "found unit literal ({}) while updating watched clauses for literal {} in clause ({:?})",
-                        //     unit_literal.to_string(),
-                        //     literal.to_string(),
-                        //     self.clause_string(ClauseIdx(clause_idx)),
-                        // );
+                    Some(unit_literal) => {
+                        debug!(
+                            self.debug_writer,
+                            "found unit literal ({}) while updating watched clauses for literal {} in clause ({:?})",
+                            unit_literal.to_string(),
+                            literal.to_string(),
+                            self.clause_string(ClauseIdx(clause_idx)),
+                        );
                         self.ready_for_unit_prop.set(clause_idx);
                     }
                 },
                 Some(to_replace) => {
-                    // debug!(
-                    //     self.debug_writer,
-                    //     "replacing watched literal {} with {} in clause ({:?})",
-                    //     literal.to_string(),
-                    //     to_replace.to_string(),
-                    //     self.clause_string(ClauseIdx(clause_idx))
-                    // );
+                    debug!(
+                        self.debug_writer,
+                        "replacing watched literal {} with {} in clause ({:?})",
+                        literal.to_string(),
+                        to_replace.to_string(),
+                        self.clause_string(ClauseIdx(clause_idx))
+                    );
                     self.watched_clauses_mut(literal).clear(clause_idx);
                     self.watched_clauses_mut(to_replace).set(clause_idx);
                 }
@@ -259,9 +258,17 @@ impl<Config: ConfigT> State<Config> {
             trail_entry.literal.to_string()
         );
         let literal = trail_entry.literal;
-        match self.update_watched_clauses(literal.negate()) {
+        match self.update_watched_clauses(literal) {
             None => (),
-            res => return res,
+            res => {
+                debug!(
+                    self.debug_writer,
+                    "found contradiction while updating watched clauses for literal {}: {:?}",
+                    literal.to_string(),
+                    res
+                );
+                return res;
+            }
         };
         let var = literal.variable();
         if literal.value() {
@@ -317,7 +324,6 @@ impl<Config: ConfigT> State<Config> {
             literal,
             decision_level,
             reason: Reason::ClauseIdx(clause_idx.0),
-            continue_: false,
         };
         if let Some(conflict) = self.add_to_trail(trail_entry) {
             UnitPropagationResult::Contradiction(conflict)
@@ -424,15 +430,12 @@ impl<Config: ConfigT> State<Config> {
         learned
     }
 
-    fn remove_from_trail_helper(&mut self, remove_greater_than: Option<usize>) -> Option<Literal> {
+    fn remove_from_trail_helper(&mut self, remove_greater_than: Option<usize>) {
         let mut trail_entry: Option<TrailEntry> = None;
         loop {
             let finished = self.trail.is_empty()
                 || match remove_greater_than {
-                    None => trail_entry
-                        .as_ref()
-                        .map(|trail_entry| trail_entry.continue_)
-                        .unwrap_or(false),
+                    None => trail_entry.as_ref().is_some(),
                     Some(decision_level) => self
                         .trail
                         .last()
@@ -451,11 +454,6 @@ impl<Config: ConfigT> State<Config> {
         } else {
             self.trail.last().unwrap().decision_level
         };
-        match trail_entry {
-            Some(last_entry) if last_entry.continue_ => Some(last_entry.literal.negate()),
-
-            Some(_) | None => None,
-        }
     }
 
     fn backtrack(&mut self, failed_clause_idx: ClauseIdx) {
@@ -482,12 +480,11 @@ impl<Config: ConfigT> State<Config> {
                 StepResult::Done(SatResult::Unsat)
             }
             Action::FinishedUnitPropagation => StepResult::Continue,
-            Action::Continue(literal, continue_flag) => {
+            Action::Continue(literal) => {
                 let trail_entry = TrailEntry {
                     literal,
                     decision_level: self.decision_level,
                     reason: Reason::Decision(literal),
-                    continue_: continue_flag,
                 };
                 if let Some(failed_idx) = self.add_to_trail(trail_entry) {
                     // ignore
@@ -517,7 +514,7 @@ impl<Config: ConfigT> State<Config> {
             Some(literal) => {
                 self.decision_level += 1;
                 let literal = literal_override.unwrap_or_else(|| literal);
-                self.react(Action::Continue(literal, true))
+                self.react(Action::Continue(literal))
             }
         }
     }
@@ -582,32 +579,32 @@ impl<Config: ConfigT> State<Config> {
             (Some(lit), None, Some(lit2), _) => {
                 watched_clauses[lit.variable()][lit.value()].set(clause_idx);
                 watched_clauses[lit2.variable()][lit2.value()].set(clause_idx);
-                // debug!(
-                //     debug_writer,
-                //     "adding watched literal {} for unit clause ({:?})",
-                //     lit.to_string(),
-                //     clause.to_string()
-                // );
+                debug!(
+                    debug_writer,
+                    "adding watched literal {} for unit clause ({:?})",
+                    lit.to_string(),
+                    clause.to_string()
+                );
                 ready_for_unit_prop.set(clause_idx);
             }
             (Some(lit), None, None, None) => {
                 watched_clauses[lit.variable()][lit.value()].set(clause_idx);
-                // debug!(
-                //     debug_writer,
-                //     "adding watched literal {} for unit clause ({:?})",
-                //     lit.to_string(),
-                //     clause.to_string()
-                // );
+                debug!(
+                    debug_writer,
+                    "adding watched literal {} for unit clause ({:?})",
+                    lit.to_string(),
+                    clause.to_string()
+                );
                 ready_for_unit_prop.set(clause_idx);
             }
             (Some(a), Some(b), _, _) => {
-                // debug!(
-                //     debug_writer,
-                //     "adding watched literals {} and {} for clause ({:?})",
-                //     a.to_string(),
-                //     b.to_string(),
-                //     clause.to_string()
-                // );
+                debug!(
+                    debug_writer,
+                    "adding watched literals {} and {} for clause ({:?})",
+                    a.to_string(),
+                    b.to_string(),
+                    clause.to_string()
+                );
                 watched_clauses[a.variable()][a.value()].set(clause_idx);
                 watched_clauses[b.variable()][b.value()].set(clause_idx);
             }
