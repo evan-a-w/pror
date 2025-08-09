@@ -618,13 +618,12 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn simplify_clauses(&mut self) {
-        let num_added_clauses = self.clauses.len() - self.num_initial_clauses;
         self.clause_sorting_buckets.clear();
         for (idx, clause) in self
             .clauses
             .iter()
             .enumerate()
-            .skip(num_added_clauses)
+            .skip(self.num_initial_clauses)
             .filter_map(|(i, x)| x.value().map(|x| (i, x)))
             .filter(|(_, x)| x.num_units == 0)
         {
@@ -644,6 +643,7 @@ impl<Config: ConfigT> State<Config> {
                 self.clause_string(x.clone())
             );
         }
+        let num_added_clauses = self.clauses.len() - self.num_initial_clauses;
         let num_to_drop = (num_added_clauses - self.num_initial_clauses * 2)
             .max(0)
             .min(num_added_clauses / 3);
