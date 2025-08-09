@@ -156,6 +156,20 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn delete_clause(&mut self, idx: usize) {
+        let mut next_variable = 0;
+        loop {
+            match self.clauses[idx]
+                .value_exn()
+                .variables
+                .first_set_ge(next_variable + 1)
+            {
+                None => break,
+                Some(variable) => {
+                    next_variable = variable;
+                    self.clauses_by_var[variable].clear(idx);
+                }
+            }
+        }
         let mut rep_variables = Config::BitSet::create();
         let mut rep_negatives = Config::BitSet::create();
         std::mem::swap(
@@ -514,7 +528,10 @@ impl<Config: ConfigT> State<Config> {
                 break;
             }
             let reason = self.trail[trail_entry_idx].reason.clone();
-            if !learned.variables.contains(self.trail[trail_entry_idx].literal.variable()) {
+            if !learned
+                .variables
+                .contains(self.trail[trail_entry_idx].literal.variable())
+            {
                 continue;
             }
             match reason {

@@ -200,6 +200,12 @@ fn factor_unsat_eg() {
     println! {"res: {:?}", res};
 }
 
+fn subsets_100_eg() {
+    let formula = dimacs::read_string(dimacs::SUBSETS_100);
+    let res = Default::solve(formula);
+    println! {"res: {:?}", res};
+}
+
 fn useless_set_thing() {
     let mut a = DefaultBitSet::create();
     let mut b = DefaultBitSet::create();
@@ -212,6 +218,7 @@ fn useless_set_thing() {
         println!("x: {}", x);
     });
 }
+
 
 pub fn main() {
     // stepped1();
@@ -226,5 +233,7 @@ pub fn main() {
     // factor_sat_eg();
     // factor_unsat_eg();
 
-    fail_eg();
+    subsets_100_eg();
+
+    // fail_eg();
 }
