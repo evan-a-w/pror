@@ -81,11 +81,43 @@ impl<T> std::ops::IndexMut<bool> for TfPair<T> {
     }
 }
 
+pub enum TombStone<T> {
+    T(T),
+    Tombstone(Option<usize>),
+}
+
+impl<T> TombStone<T> {
+    pub fn new(t: T) -> Self {
+        TombStone::T(t)
+    }
+
+    pub fn tombstone(idx: usize) -> Self {
+        TombStone::Tombstone(Some(idx))
+    }
+
+    pub fn value(&self) -> Option<&T> {
+        match self {
+            TombStone::T(t) => Some(t),
+            TombStone::Tombstone(_) => None,
+        }
+    }
+
+    pub fn value_mut(&mut self) -> Option<&mut T> {
+        match self {
+            TombStone::T(t) => Some(t),
+            TombStone::Tombstone(_) => None,
+        }
+    }
+}
+
 pub struct State<Config: ConfigT> {
     immediate_result: Option<SatResult>,
+    simplify_clauses_every: usize,
     all_variables: Config::BitSet,
     assignments: Config::BitSet,
-    clauses: Vec<Clause<Config::BitSet>>,
+    clauses_first_tombstone: Option<usize>,
+    clauses: Vec<TombStone<Clause<Config::BitSet>>>,
+    clause_sorting_buckets: Vec<ClauseIdx>,
     watched_clauses: Vec<TfPair<Config::BitSet>>,
     ready_for_unit_prop: Config::BitSet,
     trail: Vec<TrailEntry>,
@@ -129,6 +161,20 @@ impl<Config: ConfigT> State<Config> {
     }
     fn watched_clauses_mut(&mut self, literal: Literal) -> &mut Config::BitSet {
         &mut self.watched_clauses[literal.variable()][literal.value()]
+    }
+
+    fn delete_clause(&mut self, idx: usize) {
+        let mut rep_variables = Config::BitSet::create();
+        let mut rep_negatives = Config::BitSet::create();
+        std::mem::swap(&mut rep_variables, &mut self.clauses[idx].value_mut().unwrap().variables);
+        std::mem::swap(&mut rep_negatives, &mut self.clauses[idx].value_mut().unwrap().negatives);
+        if let Some(tombstone_idx) = self.clauses_first_tombstone {
+            self.clauses[tombstone_idx] = TombStone::tombstone(idx);
+            self.clauses_first_tombstone = Some(idx);
+        } else {
+            self.clauses.push(TombStone::tombstone(idx));
+            self.clauses_first_tombstone = Some(self.clauses.len() - 1);
+        }
     }
 
     fn assignments(&self) -> BTreeMap<usize, bool> {
@@ -180,7 +226,7 @@ impl<Config: ConfigT> State<Config> {
             .set(trail_entry.literal.variable());
         match trail_entry.reason {
             Reason::Decision(_) => (),
-            Reason::ClauseIdx(clause_idx) => self.clauses[clause_idx].num_units -= 1,
+            Reason::ClauseIdx(clause_idx) => self.clauses[clause_idx].value_mut().unwrap().num_units -= 1,
         };
     }
 
@@ -212,11 +258,11 @@ impl<Config: ConfigT> State<Config> {
         while let Some(clause_idx) = next {
             next = self.watched_clauses(literal).first_set_ge(clause_idx + 1);
 
-            if self.is_satisfied(&self.clauses[clause_idx]) {
+            if self.is_satisfied(&self.clauses[clause_idx].value().unwrap()) {
                 continue;
             }
 
-            let replace = self.clauses[clause_idx]
+            let replace = self.clauses[clause_idx].value().unwrap()
                 .iter_literals()
                 .filter(|&lit| {
                     !self.watched_clauses(lit).contains(clause_idx)
@@ -224,7 +270,7 @@ impl<Config: ConfigT> State<Config> {
                 })
                 .next();
             match replace {
-                None => match self.try_get_unit_literal(&self.clauses[clause_idx]) {
+                None => match self.try_get_unit_literal(&self.clauses[clause_idx].value().unwrap()) {
                     None => return Some(ClauseIdx(clause_idx)),
                     Some(unit_literal) => {
                         debug!(
@@ -275,7 +321,10 @@ impl<Config: ConfigT> State<Config> {
         );
         match trail_entry.reason {
             Reason::Decision(_) => (),
-            Reason::ClauseIdx(clause_idx) => self.clauses[clause_idx].num_units += 1,
+            Reason::ClauseIdx(clause_idx) => {
+                self.clauses[clause_idx].value_mut().unwrap().num_units += 1;
+                self.clauses[clause_idx].value_mut().unwrap().propagation_counter += 1;
+            }
         };
         self.trail_entry_idx_by_var[var] = Some(self.trail.len());
         self.unassigned_variables.clear(var);
@@ -511,11 +560,47 @@ impl<Config: ConfigT> State<Config> {
 
     fn simplify_clauses(&mut self) {
         let num_added_clauses = self.clauses.len() - self.num_initial_clauses;
+        self.clause_sorting_buckets.clear();
+        self.clause_sorting_buckets
+            .resize(num_added_clauses + 1, ClauseIdx(0));
+        for (idx, clause) in self
+            .clauses
+            .iter()
+            .enumerate()
+            .skip(num_added_clauses)
+            .filter(|(_, x)| x.num_units == 0)
+            .enumerate()
+        {
+            self.clause_sorting_buckets.push(ClauseIdx(idx));
+        }
+        self.clause_sorting_buckets
+            .sort_by(|ClauseIdx(a), ClauseIdx(b)| {
+                self.clauses[*a]
+                    .propagation_counter
+                    .cmp(&self.clauses[*b].propagation_counter)
+            });
+        let num_to_drop = (num_added_clauses - self.num_initial_clauses * 2)
+            .max(0)
+            .min(num_added_clauses / 3);
+        // HERE
     }
 
     pub fn step(&mut self, literal_override: Option<Literal>) -> StepResult {
         self.iterations += 1;
-        if self.iterations % 100 == 0 {
+        if self.iterations % self.simplify_clauses_every == 0 {
+            debug!(
+                self.debug_writer,
+                "simplifying clauses at iteration {}, num clauses {}, level {}",
+                self.iterations,
+                self.clauses.len(),
+                self.decision_level
+            );
+            println!(
+                "simplifying clauses at iteration {}, num clauses {}, level {}",
+                self.iterations,
+                self.clauses.len(),
+                self.decision_level
+            );
             self.simplify_clauses();
         };
         if let Some(res) = self.immediate_result.take() {
@@ -687,16 +772,20 @@ impl<Config: ConfigT> State<Config> {
             None
         };
 
+        let num_initial_clauses = clauses.len();
         let all_variables = variables_bitset.clone();
         let unassigned_variables = variables_bitset;
         let rng = Pcg64::seed_from_u64(5);
         State {
+            clauses_first_tombstone: None,
+            clause_sorting_buckets: vec![],
+            simplify_clauses_every: 5000,
             ready_for_unit_prop,
             immediate_result,
             all_variables,
             assignments: Config::BitSet::create(),
             clauses,
-            num_initial_clauses: clauses.len(),
+            num_initial_clauses,
             trail: Vec::with_capacity(64),
             unassigned_variables,
             watched_clauses,
