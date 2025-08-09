@@ -2,6 +2,9 @@ use crate::bitset::{BTreeBitSet, BitSetT};
 use crate::fixed_bitset;
 use crate::pool::Pool;
 use crate::sat::*;
+use crate::tombstone::*;
+use itertools::Itertools;
+use quickcheck::Gen;
 use rand::prelude::*;
 use rand_pcg::Pcg64;
 use std::cell::RefCell;
@@ -81,35 +84,6 @@ impl<T> std::ops::IndexMut<bool> for TfPair<T> {
     }
 }
 
-pub enum TombStone<T> {
-    T(T),
-    Tombstone(Option<usize>),
-}
-
-impl<T> TombStone<T> {
-    pub fn new(t: T) -> Self {
-        TombStone::T(t)
-    }
-
-    pub fn tombstone(idx: usize) -> Self {
-        TombStone::Tombstone(Some(idx))
-    }
-
-    pub fn value(&self) -> Option<&T> {
-        match self {
-            TombStone::T(t) => Some(t),
-            TombStone::Tombstone(_) => None,
-        }
-    }
-
-    pub fn value_mut(&mut self) -> Option<&mut T> {
-        match self {
-            TombStone::T(t) => Some(t),
-            TombStone::Tombstone(_) => None,
-        }
-    }
-}
-
 pub struct State<Config: ConfigT> {
     immediate_result: Option<SatResult>,
     simplify_clauses_every: usize,
@@ -118,7 +92,7 @@ pub struct State<Config: ConfigT> {
     clauses_first_tombstone: Option<usize>,
     clauses: Vec<TombStone<Clause<Config::BitSet>>>,
     clause_sorting_buckets: Vec<ClauseIdx>,
-    watched_clauses: Vec<TfPair<Config::BitSet>>,
+    watched_clauses: Vec<TfPair<BTreeMap<ClauseIdx, Generation>>>,
     ready_for_unit_prop: Config::BitSet,
     trail: Vec<TrailEntry>,
     unassigned_variables: Config::BitSet,
@@ -134,7 +108,7 @@ pub struct State<Config: ConfigT> {
     debug_writer: Option<RefCell<Box<dyn std::fmt::Write>>>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct ClauseIdx(usize);
 
 #[derive(Clone, Copy)]
@@ -156,25 +130,46 @@ enum Action {
 }
 
 impl<Config: ConfigT> State<Config> {
-    fn watched_clauses(&self, literal: Literal) -> &Config::BitSet {
+    fn watched_clauses(&self, literal: Literal) -> &BTreeMap<ClauseIdx, Generation> {
         &self.watched_clauses[literal.variable()][literal.value()]
     }
-    fn watched_clauses_mut(&mut self, literal: Literal) -> &mut Config::BitSet {
+    fn watched_clauses_mut(&mut self, literal: Literal) -> &mut BTreeMap<ClauseIdx, Generation> {
         &mut self.watched_clauses[literal.variable()][literal.value()]
+    }
+
+    fn push_clause(&mut self, clause: Clause<Config::BitSet>) -> usize {
+        match self.clauses_first_tombstone {
+            None => {
+                self.clauses.push(TombStone::new(0, clause));
+                self.clauses.len() - 1
+            }
+            Some(idx) => {
+                let gen = self.clauses[idx].generation().clone();
+                self.clauses_first_tombstone = self.clauses[idx].tombstone_idx_exn();
+                self.clauses[idx] = TombStone::new(gen + 1, clause);
+                idx
+            }
+        }
     }
 
     fn delete_clause(&mut self, idx: usize) {
         let mut rep_variables = Config::BitSet::create();
         let mut rep_negatives = Config::BitSet::create();
-        std::mem::swap(&mut rep_variables, &mut self.clauses[idx].value_mut().unwrap().variables);
-        std::mem::swap(&mut rep_negatives, &mut self.clauses[idx].value_mut().unwrap().negatives);
-        if let Some(tombstone_idx) = self.clauses_first_tombstone {
-            self.clauses[tombstone_idx] = TombStone::tombstone(idx);
-            self.clauses_first_tombstone = Some(idx);
-        } else {
-            self.clauses.push(TombStone::tombstone(idx));
-            self.clauses_first_tombstone = Some(self.clauses.len() - 1);
-        }
+        std::mem::swap(
+            &mut rep_variables,
+            &mut self.clauses[idx].value_mut().unwrap().variables,
+        );
+        std::mem::swap(
+            &mut rep_negatives,
+            &mut self.clauses[idx].value_mut().unwrap().negatives,
+        );
+        self.bitset_pool.release(rep_variables);
+        self.bitset_pool.release(rep_negatives);
+        self.clauses[idx] = TombStone::TombStone(
+            self.clauses[idx].generation().clone() + 1,
+            self.clauses_first_tombstone.clone(),
+        );
+        self.clauses_first_tombstone = Some(idx);
     }
 
     fn assignments(&self) -> BTreeMap<usize, bool> {
@@ -226,7 +221,9 @@ impl<Config: ConfigT> State<Config> {
             .set(trail_entry.literal.variable());
         match trail_entry.reason {
             Reason::Decision(_) => (),
-            Reason::ClauseIdx(clause_idx) => self.clauses[clause_idx].value_mut().unwrap().num_units -= 1,
+            Reason::ClauseIdx(clause_idx) => {
+                self.clauses[clause_idx].value_mut().unwrap().num_units -= 1
+            }
         };
     }
 
@@ -247,6 +244,20 @@ impl<Config: ConfigT> State<Config> {
         })
     }
 
+    fn remove_watched_clause_due_to_generation_mismatch(
+        &mut self,
+        literal: Literal,
+        clause_idx: ClauseIdx,
+    ) -> bool {
+        let ClauseIdx(idx) = clause_idx;
+        let expected = self.watched_clauses(literal).get(&clause_idx).unwrap();
+        if self.clauses[idx].generation() == expected {
+            return false;
+        }
+        self.watched_clauses_mut(literal).remove(&clause_idx);
+        true
+    }
+
     fn update_watched_clauses(&mut self, set_literal: Literal) -> Option<ClauseIdx> {
         debug!(
             self.debug_writer,
@@ -254,23 +265,43 @@ impl<Config: ConfigT> State<Config> {
             set_literal.to_string()
         );
         let literal = set_literal.negate();
-        let mut next = self.watched_clauses(literal).first_set();
-        while let Some(clause_idx) = next {
-            next = self.watched_clauses(literal).first_set_ge(clause_idx + 1);
+        let mut next = self
+            .watched_clauses(literal)
+            .range(ClauseIdx(0)..)
+            .next()
+            .clone()
+            .map(|(x, y)| (x.clone(), y.clone()));
+        while let Some((ClauseIdx(clause_idx), generation)) = next {
+            next = self
+                .watched_clauses(literal)
+                .range(ClauseIdx(clause_idx + 1)..)
+                .next()
+                .clone()
+                .map(|(x, y)| (x.clone(), y.clone()));
+
+            if self.remove_watched_clause_due_to_generation_mismatch(literal, ClauseIdx(clause_idx))
+            {
+                continue;
+            }
 
             if self.is_satisfied(&self.clauses[clause_idx].value().unwrap()) {
                 continue;
             }
 
-            let replace = self.clauses[clause_idx].value().unwrap()
+            let replace = self.clauses[clause_idx]
+                .value()
+                .unwrap()
                 .iter_literals()
                 .filter(|&lit| {
-                    !self.watched_clauses(lit).contains(clause_idx)
+                    !self
+                        .watched_clauses(lit)
+                        .contains_key(&ClauseIdx(clause_idx))
                         && self.unassigned_variables.contains(lit.variable())
                 })
                 .next();
             match replace {
-                None => match self.try_get_unit_literal(&self.clauses[clause_idx].value().unwrap()) {
+                None => match self.try_get_unit_literal(&self.clauses[clause_idx].value().unwrap())
+                {
                     None => return Some(ClauseIdx(clause_idx)),
                     Some(unit_literal) => {
                         debug!(
@@ -291,8 +322,12 @@ impl<Config: ConfigT> State<Config> {
                         to_replace.to_string(),
                         self.clause_string(ClauseIdx(clause_idx))
                     );
-                    self.watched_clauses_mut(literal).clear(clause_idx);
-                    self.watched_clauses_mut(to_replace).set(clause_idx);
+                    let gen = self
+                        .watched_clauses_mut(literal)
+                        .remove(&ClauseIdx(clause_idx))
+                        .unwrap();
+                    self.watched_clauses_mut(to_replace)
+                        .insert(ClauseIdx(clause_idx), gen);
                 }
             }
         }
@@ -323,7 +358,10 @@ impl<Config: ConfigT> State<Config> {
             Reason::Decision(_) => (),
             Reason::ClauseIdx(clause_idx) => {
                 self.clauses[clause_idx].value_mut().unwrap().num_units += 1;
-                self.clauses[clause_idx].value_mut().unwrap().propagation_counter += 1;
+                self.clauses[clause_idx]
+                    .value_mut()
+                    .unwrap()
+                    .propagation_counter += 1;
             }
         };
         self.trail_entry_idx_by_var[var] = Some(self.trail.len());
@@ -334,7 +372,7 @@ impl<Config: ConfigT> State<Config> {
 
     fn unit_propagate_internal(&mut self) -> UnitPropagationResult {
         if let Some(clause_idx) = self.ready_for_unit_prop.pop_first_set() {
-            match self.try_get_unit_literal(&self.clauses[clause_idx]) {
+            match self.try_get_unit_literal(&self.clauses[clause_idx].value().unwrap()) {
                 None => self.unit_propagate_internal(),
                 Some(literal) => self.with_unit_clause(literal, ClauseIdx(clause_idx)),
             }
@@ -344,7 +382,7 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn clause_string(&self, clause_idx: ClauseIdx) -> String {
-        self.clauses[clause_idx.0].to_string()
+        self.clauses[clause_idx.0].value_exn().to_string()
     }
 
     fn with_unit_clause(
@@ -378,7 +416,7 @@ impl<Config: ConfigT> State<Config> {
 
     fn unit_propagate(&mut self) -> UnitPropagationResult {
         if let Some(clause_idx) = self.ready_for_unit_prop.pop_first_set() {
-            match self.try_get_unit_literal(&self.clauses[clause_idx]) {
+            match self.try_get_unit_literal(&self.clauses[clause_idx].value_exn()) {
                 None => self.unit_propagate(),
                 Some(literal) => self.with_unit_clause(literal, ClauseIdx(clause_idx)),
             }
@@ -425,7 +463,9 @@ impl<Config: ConfigT> State<Config> {
         &mut self,
         failed_clause_idx: ClauseIdx,
     ) -> Clause<Config::BitSet> {
-        let mut learned = self.clauses[failed_clause_idx.0].copy(&mut self.bitset_pool);
+        let mut learned = self.clauses[failed_clause_idx.0]
+            .value_exn()
+            .copy(&mut self.bitset_pool);
         let mut num_at_level = 0;
 
         for lit in learned.iter_literals() {
@@ -451,10 +491,14 @@ impl<Config: ConfigT> State<Config> {
             match trail_entry.reason {
                 Reason::Decision(_) => assert!(false), // never reach this
                 Reason::ClauseIdx(clause_idx) => {
-                    for lit in self.clauses[clause_idx].iter_literals().filter(|lit| {
-                        lit.variable() == trail_entry.literal.variable()
-                            || !learned.variables.contains(lit.variable())
-                    }) {
+                    for lit in self.clauses[clause_idx]
+                        .value_exn()
+                        .iter_literals()
+                        .filter(|lit| {
+                            lit.variable() == trail_entry.literal.variable()
+                                || !learned.variables.contains(lit.variable())
+                        })
+                    {
                         let var = lit.variable();
                         if let Some(idx) = self.trail_entry_idx_by_var[var] {
                             let entry = &self.trail[idx];
@@ -467,7 +511,10 @@ impl<Config: ConfigT> State<Config> {
                             }
                         }
                     }
-                    learned.resolve_exn(&self.clauses[clause_idx], trail_entry.literal.variable());
+                    learned.resolve_exn(
+                        &self.clauses[clause_idx].value_exn(),
+                        trail_entry.literal.variable(),
+                    );
                 }
             }
         }
@@ -508,9 +555,9 @@ impl<Config: ConfigT> State<Config> {
             self.clauses_mut(lit).set(len);
         }
         self.remove_from_trail_helper(Some(remove_greater_than));
-        self.clauses.push(learned_clause);
+        let clause_idx = self.push_clause(learned_clause);
         self.ready_for_unit_prop.clear_all();
-        self.update_watch_literals_for_new_clause(self.clauses.len() - 1);
+        self.update_watch_literals_for_new_clause(clause_idx);
     }
 
     fn react(&mut self, action: Action) -> StepResult {
@@ -558,31 +605,59 @@ impl<Config: ConfigT> State<Config> {
         }
     }
 
+    fn can_trim_clause(&self, clause: &Clause<Config::BitSet>) -> bool {
+        clause.num_units == 0
+            && clause
+                .iter_literals()
+                .filter_map(|x| self.trail_entry_idx_by_var[x.variable()])
+                .map(|x| self.trail[x].decision_level)
+                .unique()
+                .collect::<Vec<_>>()
+                .len()
+                >= 3
+    }
+
     fn simplify_clauses(&mut self) {
         let num_added_clauses = self.clauses.len() - self.num_initial_clauses;
         self.clause_sorting_buckets.clear();
-        self.clause_sorting_buckets
-            .resize(num_added_clauses + 1, ClauseIdx(0));
         for (idx, clause) in self
             .clauses
             .iter()
             .enumerate()
             .skip(num_added_clauses)
+            .filter_map(|(i, x)| x.value().map(|x| (i, x)))
             .filter(|(_, x)| x.num_units == 0)
-            .enumerate()
         {
             self.clause_sorting_buckets.push(ClauseIdx(idx));
         }
         self.clause_sorting_buckets
             .sort_by(|ClauseIdx(a), ClauseIdx(b)| {
                 self.clauses[*a]
-                    .propagation_counter
-                    .cmp(&self.clauses[*b].propagation_counter)
+                    .value_exn()
+                    .score()
+                    .cmp(&self.clauses[*b].value_exn().propagation_counter)
             });
+        for x in &self.clause_sorting_buckets {
+            debug!(
+                self.debug_writer,
+                "Clause {x:?} {}",
+                self.clause_string(x.clone())
+            );
+        }
         let num_to_drop = (num_added_clauses - self.num_initial_clauses * 2)
             .max(0)
             .min(num_added_clauses / 3);
-        // HERE
+        // not bothered to sort out ownership so just iterating over i
+        for i in 0..num_to_drop {
+            let ClauseIdx(clause_idx) = self.clause_sorting_buckets[i];
+            debug!(
+                self.debug_writer,
+                "Deleting clause {clause_idx} (score {}), {}",
+                self.clauses[clause_idx].value_exn().propagation_counter,
+                self.clause_string(ClauseIdx(clause_idx))
+            );
+            self.delete_clause(clause_idx);
+        }
     }
 
     pub fn step(&mut self, literal_override: Option<Literal>) -> StepResult {
@@ -632,7 +707,8 @@ impl<Config: ConfigT> State<Config> {
         debug_writer: &Option<RefCell<Box<dyn std::fmt::Write>>>,
         clause: &Clause<Config::BitSet>,
         clause_idx: usize,
-        watched_clauses: &mut Vec<TfPair<Config::BitSet>>,
+        generation: Generation,
+        watched_clauses: &mut Vec<TfPair<BTreeMap<ClauseIdx, Generation>>>,
         ready_for_unit_prop: &mut Config::BitSet,
         unassigned_variables: &Config::BitSet,
     ) {
@@ -652,15 +728,20 @@ impl<Config: ConfigT> State<Config> {
         ) {
             (None, None, None, None) => (),
             (None, None, Some(lit), None) => {
-                watched_clauses[lit.variable()][lit.value()].set(clause_idx);
+                watched_clauses[lit.variable()][lit.value()]
+                    .insert(ClauseIdx(clause_idx), generation);
             }
             (None, None, Some(lit1), Some(lit2)) => {
-                watched_clauses[lit1.variable()][lit1.value()].set(clause_idx);
-                watched_clauses[lit2.variable()][lit2.value()].set(clause_idx);
+                watched_clauses[lit1.variable()][lit1.value()]
+                    .insert(ClauseIdx(clause_idx), generation);
+                watched_clauses[lit2.variable()][lit2.value()]
+                    .insert(ClauseIdx(clause_idx), generation);
             }
             (Some(lit), None, Some(lit2), _) => {
-                watched_clauses[lit.variable()][lit.value()].set(clause_idx);
-                watched_clauses[lit2.variable()][lit2.value()].set(clause_idx);
+                watched_clauses[lit.variable()][lit.value()]
+                    .insert(ClauseIdx(clause_idx), generation);
+                watched_clauses[lit2.variable()][lit2.value()]
+                    .insert(ClauseIdx(clause_idx), generation);
                 debug!(
                     debug_writer,
                     "adding watched literal {} for unit clause ({:?})",
@@ -670,7 +751,8 @@ impl<Config: ConfigT> State<Config> {
                 ready_for_unit_prop.set(clause_idx);
             }
             (Some(lit), None, None, None) => {
-                watched_clauses[lit.variable()][lit.value()].set(clause_idx);
+                watched_clauses[lit.variable()][lit.value()]
+                    .insert(ClauseIdx(clause_idx), generation);
                 debug!(
                     debug_writer,
                     "adding watched literal {} for unit clause ({:?})",
@@ -687,8 +769,8 @@ impl<Config: ConfigT> State<Config> {
                     b.to_string(),
                     clause.to_string()
                 );
-                watched_clauses[a.variable()][a.value()].set(clause_idx);
-                watched_clauses[b.variable()][b.value()].set(clause_idx);
+                watched_clauses[a.variable()][a.value()].insert(ClauseIdx(clause_idx), generation);
+                watched_clauses[b.variable()][b.value()].insert(ClauseIdx(clause_idx), generation);
             }
             _ => assert!(false),
         };
@@ -697,8 +779,9 @@ impl<Config: ConfigT> State<Config> {
     fn update_watch_literals_for_new_clause(&mut self, clause_idx: usize) {
         Self::update_watch_literals_for_new_clause_helper(
             &self.debug_writer,
-            &self.clauses[clause_idx],
+            &self.clauses[clause_idx].value_exn(),
             clause_idx,
+            self.clauses[clause_idx].generation().clone(),
             &mut self.watched_clauses,
             &mut self.ready_for_unit_prop,
             &self.unassigned_variables,
@@ -716,6 +799,10 @@ impl<Config: ConfigT> State<Config> {
             clauses,
             literal_counts: _,
         } = formula;
+        let clauses = clauses
+            .into_iter()
+            .map(|x| TombStone::new(0, x))
+            .collect::<Vec<_>>();
         let num_vars = max_var + 1;
         let mut variables_bitset = Config::BitSet::create();
         variables_bitset.clear_all();
@@ -730,12 +817,11 @@ impl<Config: ConfigT> State<Config> {
         for _ in 0..num_vars {
             let mut bs = bitset_pool.acquire(|| Config::BitSet::create());
             bs.clear_all();
-            let mut first = bitset_pool.acquire(|| Config::BitSet::create());
-            first.clear_all();
-            let mut second = bitset_pool.acquire(|| Config::BitSet::create());
-            second.clear_all();
             clauses_by_var.push(bs);
-            watched_clauses.push(TfPair { first, second });
+            watched_clauses.push(TfPair {
+                first: BTreeMap::new(),
+                second: BTreeMap::new(),
+            });
         }
 
         let mut instantly_unsat = false;
@@ -748,7 +834,7 @@ impl<Config: ConfigT> State<Config> {
             }
         };
 
-        for (idx, clause) in clauses.iter().enumerate() {
+        for (idx, clause) in clauses.iter().filter_map(|x| x.value()).enumerate() {
             if clause.variables.is_empty() {
                 instantly_unsat = true;
             }
@@ -759,6 +845,7 @@ impl<Config: ConfigT> State<Config> {
                 &debug_writer,
                 clause,
                 idx,
+                0,
                 &mut watched_clauses,
                 &mut ready_for_unit_prop,
                 &variables_bitset,

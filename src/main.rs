@@ -190,13 +190,13 @@ fn fail_eg() {
 
 fn factor_sat_eg() {
     let formula = dimacs::read_string(dimacs::FACTOR_1234321);
-    let res = Default::solve(formula);
+    let res = DefaultDebug::solve(formula);
     println! {"res: {:?}", res};
 }
 
 fn factor_unsat_eg() {
     let formula = dimacs::read_string(dimacs::FACTOR_1235321);
-    let res = Default::solve(formula);
+    let res = DefaultDebug::solve(formula);
     println! {"res: {:?}", res};
 }
 
@@ -223,8 +223,8 @@ pub fn main() {
     // sudoku();
     // simple();
 
-    // factor_sat_eg();
-    factor_unsat_eg();
+    factor_sat_eg();
+    // factor_unsat_eg();
 
     // fail_eg();
 }

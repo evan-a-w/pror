@@ -1,5 +1,6 @@
 use crate::bitset::BitSetT;
 use crate::pool::Pool;
+use crate::tombstone::*;
 use std::collections::HashSet;
 use std::collections::{BTreeMap, HashMap};
 
@@ -15,6 +16,7 @@ pub enum StepResult {
     Continue,
 }
 
+#[derive(Debug)]
 pub struct Clause<BitSet: BitSetT> {
     pub variables: BitSet,
     pub negatives: BitSet,
@@ -24,10 +26,10 @@ pub struct Clause<BitSet: BitSetT> {
 }
 
 pub fn satisfies<BitSet: BitSetT>(
-    clauses: &Vec<Clause<BitSet>>,
+    clauses: &Vec<TombStone<Clause<BitSet>>>,
     assignments: &BTreeMap<usize, bool>,
 ) -> bool {
-    clauses.iter().all(|clause| {
+    clauses.iter().filter_map(|x| x.value()).all(|clause| {
         clause.iter_literals().any(|literal| {
             if let Some(&value) = assignments.get(&literal.variable()) {
                 value == literal.value()
@@ -39,6 +41,10 @@ pub fn satisfies<BitSet: BitSetT>(
 }
 
 impl<BitSet: BitSetT> Clause<BitSet> {
+    pub fn score(&self) -> usize {
+        self.propagation_counter
+    }
+
     pub fn empty() -> Self {
         Clause {
             variables: BitSet::create(),
