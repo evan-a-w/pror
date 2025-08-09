@@ -85,6 +85,9 @@ impl<T> std::ops::IndexMut<bool> for TfPair<T> {
 }
 
 pub struct State<Config: ConfigT> {
+    cla_inc: f64,
+    cla_decay_factor: f64,
+    cla_activity_rescale: f64,
     immediate_result: Option<SatResult>,
     simplify_clauses_every: usize,
     all_variables: Config::BitSet,
@@ -358,10 +361,6 @@ impl<Config: ConfigT> State<Config> {
             Reason::Decision(_) => (),
             Reason::ClauseIdx(clause_idx) => {
                 self.clauses[clause_idx].value_mut().unwrap().num_units += 1;
-                self.clauses[clause_idx]
-                    .value_mut()
-                    .unwrap()
-                    .propagation_counter += 1;
             }
         };
         self.trail_entry_idx_by_var[var] = Some(self.trail.len());
@@ -372,7 +371,10 @@ impl<Config: ConfigT> State<Config> {
 
     fn unit_propagate_internal(&mut self) -> UnitPropagationResult {
         if let Some(clause_idx) = self.ready_for_unit_prop.pop_first_set() {
-            match self.try_get_unit_literal(&self.clauses[clause_idx].value().unwrap()) {
+            match self.clauses[clause_idx]
+                .value()
+                .and_then(|x| self.try_get_unit_literal(x))
+            {
                 None => self.unit_propagate_internal(),
                 Some(literal) => self.with_unit_clause(literal, ClauseIdx(clause_idx)),
             }
@@ -416,7 +418,10 @@ impl<Config: ConfigT> State<Config> {
 
     fn unit_propagate(&mut self) -> UnitPropagationResult {
         if let Some(clause_idx) = self.ready_for_unit_prop.pop_first_set() {
-            match self.try_get_unit_literal(&self.clauses[clause_idx].value_exn()) {
+            match self.clauses[clause_idx]
+                .value()
+                .and_then(|x| self.try_get_unit_literal(x))
+            {
                 None => self.unit_propagate(),
                 Some(literal) => self.with_unit_clause(literal, ClauseIdx(clause_idx)),
             }
@@ -459,6 +464,28 @@ impl<Config: ConfigT> State<Config> {
         max2
     }
 
+    fn rescale_clause_activities(&mut self) {
+        for clause in self.clauses.iter_mut().filter_map(|x| x.value_mut()) {
+            clause.score /= self.cla_activity_rescale;
+        }
+    }
+
+    fn add_clause_activity(&mut self, clause_idx: usize) -> bool {
+        self.clauses[clause_idx].value_mut_exn().score += self.cla_inc;
+        // should rescale
+        self.clauses[clause_idx].value_mut_exn().score > self.cla_activity_rescale
+    }
+
+    fn add_clause_activity_and_maybe_rescale(&mut self, clause_idx: usize) {
+        if self.add_clause_activity(clause_idx) {
+            self.rescale_clause_activities();
+        }
+    }
+
+    fn decay_clause_activities(&mut self) {
+        self.cla_inc /= self.cla_decay_factor;
+    }
+
     fn learn_clause_from_failure(
         &mut self,
         failed_clause_idx: ClauseIdx,
@@ -478,19 +505,23 @@ impl<Config: ConfigT> State<Config> {
             }
         }
 
-        for trail_entry in self.trail.iter().rev() {
+        let mut rescale = false;
+        for trail_entry_idx in (0..self.trail.len()).rev() {
             // if self.only_one_at_level(&learned) {
             //     break;
             // }
             if num_at_level == 1 {
                 break;
             }
-            if !learned.variables.contains(trail_entry.literal.variable()) {
+            let reason = self.trail[trail_entry_idx].reason.clone();
+            if !learned.variables.contains(self.trail[trail_entry_idx].literal.variable()) {
                 continue;
             }
-            match trail_entry.reason {
+            match reason {
                 Reason::Decision(_) => assert!(false), // never reach this
                 Reason::ClauseIdx(clause_idx) => {
+                    self.add_clause_activity(clause_idx);
+                    let trail_entry = &self.trail[trail_entry_idx];
                     for lit in self.clauses[clause_idx]
                         .value_exn()
                         .iter_literals()
@@ -615,49 +646,48 @@ impl<Config: ConfigT> State<Config> {
                 .collect::<Vec<_>>()
                 .len()
                 >= 3
+            && clause.variables.count() >= 3
     }
 
     fn simplify_clauses(&mut self) {
-        self.clause_sorting_buckets.clear();
+        let mut sorting_buckets = vec![];
+        std::mem::swap(&mut sorting_buckets, &mut self.clause_sorting_buckets);
+        sorting_buckets.clear();
         for (idx, clause) in self
             .clauses
             .iter()
             .enumerate()
             .skip(self.num_initial_clauses)
             .filter_map(|(i, x)| x.value().map(|x| (i, x)))
-            .filter(|(_, x)| x.num_units == 0)
+            .filter(|(_, x)| x.num_units == 0 && self.can_trim_clause(x))
         {
-            self.clause_sorting_buckets.push(ClauseIdx(idx));
+            sorting_buckets.push(ClauseIdx(idx));
         }
-        self.clause_sorting_buckets
-            .sort_by(|ClauseIdx(a), ClauseIdx(b)| {
-                self.clauses[*a]
-                    .value_exn()
-                    .score()
-                    .cmp(&self.clauses[*b].value_exn().propagation_counter)
-            });
-        for x in &self.clause_sorting_buckets {
+        sorting_buckets.sort_by(|ClauseIdx(a), ClauseIdx(b)| {
+            f64::total_cmp(
+                &self.clauses[*a].value_exn().score,
+                &self.clauses[*b].value_exn().score,
+            )
+        });
+        for x in &sorting_buckets {
             debug!(
                 self.debug_writer,
                 "Clause {x:?} {}",
                 self.clause_string(x.clone())
             );
         }
-        let num_added_clauses = self.clauses.len() - self.num_initial_clauses;
-        let num_to_drop = (num_added_clauses - self.num_initial_clauses * 2)
-            .max(0)
-            .min(num_added_clauses / 3);
+        let num_to_drop = sorting_buckets.len() / 2;
         // not bothered to sort out ownership so just iterating over i
-        for i in 0..num_to_drop {
-            let ClauseIdx(clause_idx) = self.clause_sorting_buckets[i];
+        for ClauseIdx(clause_idx) in sorting_buckets.iter().take(num_to_drop) {
             debug!(
                 self.debug_writer,
                 "Deleting clause {clause_idx} (score {}), {}",
-                self.clauses[clause_idx].value_exn().propagation_counter,
-                self.clause_string(ClauseIdx(clause_idx))
+                self.clauses[*clause_idx].value_exn().score,
+                self.clause_string(ClauseIdx(*clause_idx))
             );
-            self.delete_clause(clause_idx);
+            self.delete_clause(*clause_idx);
         }
+        std::mem::swap(&mut sorting_buckets, &mut self.clause_sorting_buckets);
     }
 
     pub fn step(&mut self, literal_override: Option<Literal>) -> StepResult {
@@ -667,16 +697,25 @@ impl<Config: ConfigT> State<Config> {
                 self.debug_writer,
                 "simplifying clauses at iteration {}, num clauses {}, level {}",
                 self.iterations,
-                self.clauses.len(),
+                self.clauses
+                    .iter()
+                    .filter_map(|x| x.value())
+                    .collect::<Vec<_>>()
+                    .len(),
                 self.decision_level
             );
             println!(
                 "simplifying clauses at iteration {}, num clauses {}, level {}",
                 self.iterations,
-                self.clauses.len(),
+                self.clauses
+                    .iter()
+                    .filter_map(|x| x.value())
+                    .collect::<Vec<_>>()
+                    .len(),
                 self.decision_level
             );
             self.simplify_clauses();
+            self.decay_clause_activities();
         };
         if let Some(res) = self.immediate_result.take() {
             return StepResult::Done(res);
@@ -864,9 +903,12 @@ impl<Config: ConfigT> State<Config> {
         let unassigned_variables = variables_bitset;
         let rng = Pcg64::seed_from_u64(5);
         State {
+            cla_decay_factor: 0.75,
+            cla_activity_rescale: 1e20,
+            cla_inc: 1.0,
             clauses_first_tombstone: None,
             clause_sorting_buckets: vec![],
-            simplify_clauses_every: 5000,
+            simplify_clauses_every: 2500,
             ready_for_unit_prop,
             immediate_result,
             all_variables,

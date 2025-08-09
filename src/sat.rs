@@ -22,7 +22,7 @@ pub struct Clause<BitSet: BitSetT> {
     pub negatives: BitSet,
     pub tautology: bool,
     pub num_units: usize,
-    pub propagation_counter: usize,
+    pub score: f64,
 }
 
 pub fn satisfies<BitSet: BitSetT>(
@@ -41,17 +41,13 @@ pub fn satisfies<BitSet: BitSetT>(
 }
 
 impl<BitSet: BitSetT> Clause<BitSet> {
-    pub fn score(&self) -> usize {
-        self.propagation_counter
-    }
-
     pub fn empty() -> Self {
         Clause {
             variables: BitSet::create(),
             negatives: BitSet::create(),
             tautology: false,
             num_units: 0,
-            propagation_counter: 0,
+            score: 0.0,
         }
     }
     pub fn create(variables: BitSet, negatives: BitSet) -> Self {
@@ -60,7 +56,7 @@ impl<BitSet: BitSetT> Clause<BitSet> {
             negatives,
             tautology: false,
             num_units: 0,
-            propagation_counter: 0,
+            score: 0.0,
         }
     }
 
@@ -88,8 +84,8 @@ impl<BitSet: BitSetT> Clause<BitSet> {
             variables,
             negatives,
             tautology: self.tautology,
-            num_units: self.num_units,
-            propagation_counter: self.propagation_counter,
+            num_units: 0,
+            score: 0.0,
         }
     }
 
@@ -195,7 +191,7 @@ impl<BitSet: BitSetT> Formula<BitSet> {
                 negatives,
                 tautology,
                 num_units: 0,
-                propagation_counter: 0,
+                score: 0.0,
             });
         }
 
