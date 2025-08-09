@@ -1,5 +1,6 @@
 use crate::bitset::BitSetT;
 use crate::pool::Pool;
+use crate::tombstone::*;
 use std::collections::HashSet;
 use std::collections::{BTreeMap, HashMap};
 
@@ -15,17 +16,20 @@ pub enum StepResult {
     Continue,
 }
 
+#[derive(Debug)]
 pub struct Clause<BitSet: BitSetT> {
     pub variables: BitSet,
     pub negatives: BitSet,
     pub tautology: bool,
+    pub num_units: usize,
+    pub score: f64,
 }
 
 pub fn satisfies<BitSet: BitSetT>(
-    clauses: &Vec<Clause<BitSet>>,
+    clauses: &Vec<TombStone<Clause<BitSet>>>,
     assignments: &BTreeMap<usize, bool>,
 ) -> bool {
-    clauses.iter().all(|clause| {
+    clauses.iter().filter_map(|x| x.value()).all(|clause| {
         clause.iter_literals().any(|literal| {
             if let Some(&value) = assignments.get(&literal.variable()) {
                 value == literal.value()
@@ -37,12 +41,28 @@ pub fn satisfies<BitSet: BitSetT>(
 }
 
 impl<BitSet: BitSetT> Clause<BitSet> {
+    pub fn empty() -> Self {
+        Clause {
+            variables: BitSet::create(),
+            negatives: BitSet::create(),
+            tautology: false,
+            num_units: 0,
+            score: 0.0,
+        }
+    }
     pub fn create(variables: BitSet, negatives: BitSet) -> Self {
         Clause {
             variables,
             negatives,
             tautology: false,
+            num_units: 0,
+            score: 0.0,
         }
+    }
+
+    pub fn contains(&self, literal: Literal) -> bool {
+        let var = literal.variable();
+        self.variables.contains(var) && (self.negatives.contains(var) != literal.value())
     }
 
     pub fn to_string(&self) -> String {
@@ -64,6 +84,8 @@ impl<BitSet: BitSetT> Clause<BitSet> {
             variables,
             negatives,
             tautology: self.tautology,
+            num_units: 0,
+            score: 0.0,
         }
     }
 
@@ -168,6 +190,8 @@ impl<BitSet: BitSetT> Formula<BitSet> {
                 variables,
                 negatives,
                 tautology,
+                num_units: 0,
+                score: 0.0,
             });
         }
 

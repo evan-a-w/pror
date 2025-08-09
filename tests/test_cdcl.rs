@@ -131,70 +131,91 @@ mod tests {
         step_and_print(&mut writer, &mut solver, None);
         step_and_print(&mut writer, &mut solver, None);
         let expect = expect![[r#"
-            reacting to action: Continue(Literal { value: -1 }, true) at decision level 1
+            adding watched literals 1 and 2 for clause ("(1 2 3)")
+            adding watched literals 1 and 2 for clause ("(1 2 -3)")
+            adding watched literals -2 and 4 for clause ("(-2 4)")
+            adding watched literals 1 and -2 for clause ("(1 -2 -4)")
+            adding watched literals -1 and 5 for clause ("(-1 5 6)")
+            adding watched literals -1 and 5 for clause ("(-1 5 -6)")
+            adding watched literals -5 and -6 for clause ("(-5 -6)")
+            adding watched literals -1 and -5 for clause ("(-1 -5 6)")
+            reacting to action: Continue(Literal { value: -1 }) at decision level 1
             adding to trail at decision level 1: -1
-            satisfy_clauses: clauses satisfied by literal -1: (-1 5 6), (-1 5 -6), (-1 -5 6)
+            updating watched clauses for literal -1
+            replacing watched literal 1 with 3 in clause ("(1 2 3)")
+            replacing watched literal 1 with -3 in clause ("(1 2 -3)")
+            replacing watched literal 1 with -4 in clause ("(1 -2 -4)")
 
             Continue
-            reacting to action: Continue(Literal { value: -2 }, true) at decision level 2
+            reacting to action: Continue(Literal { value: -2 }) at decision level 2
             adding to trail at decision level 2: -2
-            satisfy_clauses: clauses satisfied by literal -2: (-2 4), (1 -2 -4)
+            updating watched clauses for literal -2
+            found unit literal (3) while updating watched clauses for literal 2 in clause ("(1 2 3)")
+            found unit literal (-3) while updating watched clauses for literal 2 in clause ("(1 2 -3)")
 
             Continue
-            found unit clause: Literal { value: 3 } in clause ("(1 2 3)")
-            would be contradiction with clause "(1 2 -3)" for literal 3
+            found unit clause: Literal { value: 3 } in clause ("(1 2 3)") unit clauses rn: (1 2 -3)
             adding to trail at decision level 2: 3
-            satisfy_clauses: clauses satisfied by literal 3: (1 2 3)
+            updating watched clauses for literal 3
             reacting to action: Contradiction(1) at decision level 2
             undoing trail entry: 3 at decision level 2
             undoing trail entry: -2 at decision level 2
+            adding watched literal 2 for unit clause ("(1 2)")
 
             Continue
-            found unit clause: Literal { value: 2 } in clause ("(1 2)")
+            found unit clause: Literal { value: 2 } in clause ("(1 2)") unit clauses rn: 
             adding to trail at decision level 1: 2
-            satisfy_clauses: clauses satisfied by literal 2: (1 2 3), (1 2 -3), (1 2)
-            found unit clause: Literal { value: 4 } in clause ("(-2 4)")
-            would be contradiction with clause "(1 -2 -4)" for literal 4
+            updating watched clauses for literal 2
+            found unit literal (4) while updating watched clauses for literal -2 in clause ("(-2 4)")
+            found unit literal (-4) while updating watched clauses for literal -2 in clause ("(1 -2 -4)")
+            found unit clause: Literal { value: 4 } in clause ("(-2 4)") unit clauses rn: (1 -2 -4)
             adding to trail at decision level 1: 4
-            satisfy_clauses: clauses satisfied by literal 4: (-2 4)
+            updating watched clauses for literal 4
             reacting to action: Contradiction(3) at decision level 1
             undoing trail entry: 4 at decision level 1
             undoing trail entry: 2 at decision level 1
             undoing trail entry: -1 at decision level 1
+            adding watched literal 1 for unit clause ("(1)")
 
             Continue
-            found unit clause: Literal { value: 1 } in clause ("(1)")
+            found unit clause: Literal { value: 1 } in clause ("(1)") unit clauses rn: 
             adding to trail at decision level 0: 1
-            satisfy_clauses: clauses satisfied by literal 1: (1 2 3), (1 2 -3), (1 -2 -4), (1 2), (1)
+            updating watched clauses for literal 1
+            replacing watched literal -1 with 6 in clause ("(-1 5 6)")
+            replacing watched literal -1 with -6 in clause ("(-1 5 -6)")
+            replacing watched literal -1 with 6 in clause ("(-1 -5 6)")
 
             Continue
-            reacting to action: Continue(Literal { value: 3 }, true) at decision level 1
+            reacting to action: Continue(Literal { value: 3 }) at decision level 1
             adding to trail at decision level 1: 3
-            satisfy_clauses: clauses satisfied by literal 3: 
+            updating watched clauses for literal 3
 
             Continue
-            reacting to action: Continue(Literal { value: -5 }, true) at decision level 2
+            reacting to action: Continue(Literal { value: -5 }) at decision level 2
             adding to trail at decision level 2: -5
-            satisfy_clauses: clauses satisfied by literal -5: (-5 -6), (-1 -5 6)
+            updating watched clauses for literal -5
+            found unit literal (6) while updating watched clauses for literal 5 in clause ("(-1 5 6)")
+            found unit literal (-6) while updating watched clauses for literal 5 in clause ("(-1 5 -6)")
 
             Continue
-            found unit clause: Literal { value: 6 } in clause ("(-1 5 6)")
-            would be contradiction with clause "(-1 5 -6)" for literal 6
+            found unit clause: Literal { value: 6 } in clause ("(-1 5 6)") unit clauses rn: (-1 5 -6)
             adding to trail at decision level 2: 6
-            satisfy_clauses: clauses satisfied by literal 6: (-1 5 6)
+            updating watched clauses for literal 6
             reacting to action: Contradiction(5) at decision level 2
             undoing trail entry: 6 at decision level 2
             undoing trail entry: -5 at decision level 2
             undoing trail entry: 3 at decision level 1
+            adding watched literal 5 for unit clause ("(-1 5)")
 
             Continue
-            found unit clause: Literal { value: 5 } in clause ("(-1 5)")
+            found unit clause: Literal { value: 5 } in clause ("(-1 5)") unit clauses rn: 
             adding to trail at decision level 0: 5
-            satisfy_clauses: clauses satisfied by literal 5: (-1 5 6), (-1 5 -6), (-1 5)
-            found unit clause: Literal { value: -6 } in clause ("(-5 -6)")
-            would be contradiction with clause "(-1 -5 6)" for literal -6
+            updating watched clauses for literal 5
+            found unit literal (-6) while updating watched clauses for literal -5 in clause ("(-5 -6)")
+            found unit literal (6) while updating watched clauses for literal -5 in clause ("(-1 -5 6)")
+            found unit clause: Literal { value: -6 } in clause ("(-5 -6)") unit clauses rn: (-1 -5 6)
             adding to trail at decision level 0: -6
-            satisfy_clauses: clauses satisfied by literal -6: (-5 -6)
+            updating watched clauses for literal -6
             reacting to action: Contradiction(7) at decision level 0
 
             Done(Unsat)
@@ -225,24 +246,44 @@ mod tests {
         let res = DefaultDebug::solve_with_debug_writer(formula, Some(writer.clone()));
         writeln!(writer, "{:?}", res);
         let expect = expect![[r#"
-            reacting to action: Continue(Literal { value: -3 }, true) at decision level 1
+            adding watched literals 3 and -5 for clause ("(3 -5 6)")
+            adding watched literals -2 and -3 for clause ("(-2 -3 -4 -5 6)")
+            adding watched literals 1 and 4 for clause ("(1 4 -5 -6)")
+            adding watched literals 1 and 2 for clause ("(1 2 3 -4 5 6)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 -3 4 -5 6)")
+            adding watched literals -2 and 3 for clause ("(-2 3 4 -6)")
+            adding watched literals -1 and 2 for clause ("(-1 2 3)")
+            adding watched literals -3 and -4 for clause ("(-3 -4 5 -6)")
+            adding watched literals -1 and 2 for clause ("(-1 2 -3 -4 5 6)")
+            adding watched literals -2 and -3 for clause ("(-2 -3 4 5)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 3 -4 -5 -6)")
+            adding watched literals -2 and -6 for clause ("(-2 -6)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 4 5)")
+            adding watched literals 1 and 2 for clause ("(1 2 3 -4 -5 -6)")
+            reacting to action: Continue(Literal { value: -3 }) at decision level 1
             adding to trail at decision level 1: -3
-            satisfy_clauses: clauses satisfied by literal -3: (-2 -3 -4 -5 6), (-1 -2 -3 4 -5 6), (-3 -4 5 -6), (-1 2 -3 -4 5 6), (-2 -3 4 5)
-            reacting to action: Continue(Literal { value: -6 }, true) at decision level 2
+            updating watched clauses for literal -3
+            replacing watched literal 3 with 6 in clause ("(3 -5 6)")
+            replacing watched literal 3 with 4 in clause ("(-2 3 4 -6)")
+            reacting to action: Continue(Literal { value: -6 }) at decision level 2
             adding to trail at decision level 2: -6
-            satisfy_clauses: clauses satisfied by literal -6: (1 4 -5 -6), (-2 3 4 -6), (-1 -2 3 -4 -5 -6), (-2 -6), (1 2 3 -4 -5 -6)
-            found unit clause: Literal { value: -5 } in clause ("(3 -5 6)")
+            updating watched clauses for literal -6
+            found unit literal (-5) while updating watched clauses for literal 6 in clause ("(3 -5 6)")
+            found unit clause: Literal { value: -5 } in clause ("(3 -5 6)") unit clauses rn: 
             adding to trail at decision level 2: -5
-            satisfy_clauses: clauses satisfied by literal -5: (3 -5 6)
-            reacting to action: Continue(Literal { value: 1 }, true) at decision level 3
+            updating watched clauses for literal -5
+            reacting to action: Continue(Literal { value: 1 }) at decision level 3
             adding to trail at decision level 3: 1
-            satisfy_clauses: clauses satisfied by literal 1: (1 2 3 -4 5 6)
-            found unit clause: Literal { value: 2 } in clause ("(-1 2 3)")
+            updating watched clauses for literal 1
+            found unit literal (2) while updating watched clauses for literal -1 in clause ("(-1 2 3)")
+            replacing watched literal -1 with 4 in clause ("(-1 -2 4 5)")
+            found unit clause: Literal { value: 2 } in clause ("(-1 2 3)") unit clauses rn: 
             adding to trail at decision level 3: 2
-            satisfy_clauses: clauses satisfied by literal 2: (-1 2 3)
-            found unit clause: Literal { value: 4 } in clause ("(-1 -2 4 5)")
+            updating watched clauses for literal 2
+            found unit literal (4) while updating watched clauses for literal -2 in clause ("(-1 -2 4 5)")
+            found unit clause: Literal { value: 4 } in clause ("(-1 -2 4 5)") unit clauses rn: 
             adding to trail at decision level 3: 4
-            satisfy_clauses: clauses satisfied by literal 4: (-1 -2 4 5)
+            updating watched clauses for literal 4
             Sat({1: true, 2: true, 3: false, 4: true, 5: false, 6: false})
         "#]];
         expect.assert_eq(writer.borrow().as_ref());
@@ -340,51 +381,163 @@ mod tests {
         let res = DefaultDebug::solve_with_debug_writer(formula, Some(writer.clone()));
         writeln!(writer, "{:?}", res);
         let expect = expect![[r#"
-            found unit clause: Literal { value: -3 } in clause ("(-3)")
+            adding watched literals 1 and 3 for clause ("(1 3 4 -5 6 9 -10 12 -13 14 15)")
+            adding watched literals 1 and -3 for clause ("(1 -3 -4 5 -6 -7 8 9 -10 11 -12 -13 14 -15)")
+            adding watched literals -4 and -5 for clause ("(-4 -5 -6 -7 8 10 12 -13 15)")
+            adding watched literals 5 and 8 for clause ("(5 8 -11 -12 -13 14 -15)")
+            adding watched literals 3 and 5 for clause ("(3 5 8 10 -11 12 13 -14)")
+            adding watched literals -4 and -13 for clause ("(-4 -13)")
+            adding watched literals 11 and 14 for clause ("(11 14)")
+            adding watched literals -5 and -6 for clause ("(-5 -6 13 -14)")
+            adding watched literals 4 and -5 for clause ("(4 -5 -14)")
+            adding watched literals 2 and -6 for clause ("(2 -6 8 12)")
+            adding watched literals 1 and 2 for clause ("(1 2 -3 -4 -5 6 7 8 9 10 11 12 -13 15)")
+            adding watched literals 1 and -2 for clause ("(1 -2 -4 5 9 -11 12 13 -14 -15)")
+            adding watched literals 6 and -7 for clause ("(6 -7 -12 15)")
+            adding watched literals 1 and -3 for clause ("(1 -3 5 7 -8 -9 10 11 -12 13 -14 -15)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 -3 -4 -5 -6 -9 -10 -11 -12 -13 14)")
+            adding watched literals -2 and -3 for clause ("(-2 -3 -4 -5 6 7 8 -9 -10 11 14)")
+            adding watched literals 1 and -2 for clause ("(1 -2 3 -4 5 6 7 -8 9 10 11 12 -13 -14 -15)")
+            adding watched literals 1 and 2 for clause ("(1 2 3 -4 8 -10 -14 15)")
+            adding watched literals 3 and 9 for clause ("(3 9)")
+            adding watched literals -2 and -4 for clause ("(-2 -4 -5 7 -8)")
+            adding watched literals 1 and -2 for clause ("(1 -2 3 -7 -11 12 -14 -15)")
+            adding watched literals -3 and -5 for clause ("(-3 -5 8)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 3 -4 -6 -8 -10 12 13 -14 -15)")
+            adding watched literals -1 and -3 for clause ("(-1 -3 5 7 8 -9 -11 -13 -14)")
+            adding watched literal -3 for unit clause ("(-3)")
+            adding watched literals -1 and 2 for clause ("(-1 2 -3 4 -5 6 7 -8 -9 10 -11 -12 -13 14 15)")
+            adding watched literals -2 and -5 for clause ("(-2 -5 -6 7 8 -9 10 12 -15)")
+            adding watched literals 13 and 15 for clause ("(13 15)")
+            adding watched literals -1 and 2 for clause ("(-1 2 -3 5 6 9 12 14 -15)")
+            adding watched literals -1 and -4 for clause ("(-1 -4 11 13)")
+            adding watched literals -5 and 6 for clause ("(-5 6 12 14)")
+            adding watched literals 1 and 3 for clause ("(1 3 -4 -6 7 9 10 13 -15)")
+            adding watched literals -3 and -8 for clause ("(-3 -8)")
+            adding watched literals -2 and 7 for clause ("(-2 7 8 -12 14)")
+            adding watched literals 2 and 3 for clause ("(2 3 -9 -11 -12)")
+            adding watched literals 4 and -10 for clause ("(4 -10)")
+            adding watched literals 1 and -4 for clause ("(1 -4 5 6 7 -8 9 11)")
+            adding watched literals -1 and -3 for clause ("(-1 -3 5 6 7 8 -11 -13 -14 15)")
+            adding watched literals 1 and 2 for clause ("(1 2 3 5 -7 9)")
+            adding watched literals 3 and 9 for clause ("(3 9 -11)")
+            adding watched literals 1 and 2 for clause ("(1 2 4 6 -7 9 10 11 12 -15)")
+            adding watched literals -6 and 9 for clause ("(-6 9)")
+            adding watched literals 1 and -2 for clause ("(1 -2 -3 -4 5 -6 -7 8 9 10 -11 12 13 14 15)")
+            adding watched literals -8 and -9 for clause ("(-8 -9 -10)")
+            adding watched literals -2 and 3 for clause ("(-2 3 6 8 10 12 -14 -15)")
+            adding watched literals 4 and 6 for clause ("(4 6 -7 -9 15)")
+            adding watched literals -2 and 4 for clause ("(-2 4 8 -9 10 -12 -14)")
+            adding watched literal -10 for unit clause ("(-10)")
+            adding watched literals -3 and -14 for clause ("(-3 -14)")
+            adding watched literals 1 and 2 for clause ("(1 2 4 5 6 7 -9 10 -11 12)")
+            adding watched literals -1 and -6 for clause ("(-1 -6 11)")
+            adding watched literals -3 and -7 for clause ("(-3 -7 8 -10 11 -14 15)")
+            adding watched literals 1 and 2 for clause ("(1 2 3 4 5 6 7 -8 9 10 -12 -13 -14 -15)")
+            adding watched literals -1 and 3 for clause ("(-1 3 -5 -12)")
+            adding watched literals 1 and 2 for clause ("(1 2 -4 5 6 -7 8 -9 10 11 12 13 14 -15)")
+            adding watched literals 3 and -10 for clause ("(3 -10)")
+            adding watched literals 1 and 2 for clause ("(1 2 3 -4 -5 6 -7 8 9 -10 11 12 -13 14 15)")
+            adding watched literals 3 and -5 for clause ("(3 -5 6 7 -9 -14 15)")
+            adding watched literals -1 and -3 for clause ("(-1 -3 -5 -7 -8 -11 12 -15)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 3 -5 6 -7 -8 -9 11 -12 -13 14 15)")
+            adding watched literals 1 and 2 for clause ("(1 2 3 -4 6 -8 -9 -10 -12 13 14 -15)")
+            adding watched literals 1 and 2 for clause ("(1 2 -3 13 14 -15)")
+            adding watched literals 1 and -2 for clause ("(1 -2 3 -4 -5 6 7 8 -11 -15)")
+            adding watched literal 4 for unit clause ("(4)")
+            adding watched literals -2 and 4 for clause ("(-2 4 -6 12 13 -15)")
+            adding watched literals -1 and 4 for clause ("(-1 4 -5 -8 9 13 -14)")
+            adding watched literals -1 and 2 for clause ("(-1 2 3 6 -7 8 10 11)")
+            adding watched literals 3 and -4 for clause ("(3 -4 6 -8 -10 11 -13 -14)")
+            adding watched literals 1 and -3 for clause ("(1 -3 -4 5 7 8 -9 -10 11 -12 13)")
+            adding watched literals 1 and -2 for clause ("(1 -2 -3 7 -10 11 12 13 -14)")
+            adding watched literals -6 and 7 for clause ("(-6 7 -8 -10 14)")
+            adding watched literals -1 and -5 for clause ("(-1 -5 -7 8 -11 -14)")
+            adding watched literals 2 and -3 for clause ("(2 -3 7 8 14 15)")
+            adding watched literal -3 for unit clause ("(-3)")
+            adding watched literals -1 and 3 for clause ("(-1 3 -5 9 10 -11 -13 -14 15)")
+            adding watched literals -2 and -3 for clause ("(-2 -3 4 -5 7 -9 11)")
+            adding watched literals -3 and -6 for clause ("(-3 -6 -7 8)")
+            adding watched literals -2 and -5 for clause ("(-2 -5 -8 -9 10 -11 14)")
+            adding watched literals -10 and 11 for clause ("(-10 11 -14)")
+            adding watched literals 3 and -5 for clause ("(3 -5 8 11 12 -13 15)")
+            adding watched literals 2 and -3 for clause ("(2 -3 8 12 -13 -14)")
+            adding watched literals -1 and 2 for clause ("(-1 2 -3 4 5 -8 10 11 -12 -14 15)")
+            adding watched literals 1 and 2 for clause ("(1 2 4 -5 7 8 -10 -11)")
+            found unit clause: Literal { value: -3 } in clause ("(-3)") unit clauses rn: (-10); (4); (-3)
             adding to trail at decision level 0: -3
-            satisfy_clauses: clauses satisfied by literal -3: (1 -3 -4 5 -6 -7 8 9 -10 11 -12 -13 14 -15), (1 2 -3 -4 -5 6 7 8 9 10 11 12 -13 15), (1 -3 5 7 -8 -9 10 11 -12 13 -14 -15), (-1 -2 -3 -4 -5 -6 -9 -10 -11 -12 -13 14), (-2 -3 -4 -5 6 7 8 -9 -10 11 14), (-3 -5 8), (-1 -3 5 7 8 -9 -11 -13 -14), (-3), (-1 2 -3 4 -5 6 7 -8 -9 10 -11 -12 -13 14 15), (-1 2 -3 5 6 9 12 14 -15), (-3 -8), (-1 -3 5 6 7 8 -11 -13 -14 15), (1 -2 -3 -4 5 -6 -7 8 9 10 -11 12 13 14 15), (-3 -14), (-3 -7 8 -10 11 -14 15), (-1 -3 -5 -7 -8 -11 12 -15), (1 2 -3 13 14 -15), (1 -3 -4 5 7 8 -9 -10 11 -12 13), (1 -2 -3 7 -10 11 12 13 -14), (2 -3 7 8 14 15), (-3), (-2 -3 4 -5 7 -9 11), (-3 -6 -7 8), (2 -3 8 12 -13 -14), (-1 2 -3 4 5 -8 10 11 -12 -14 15)
-            found unit clause: Literal { value: 9 } in clause ("(3 9)")
+            updating watched clauses for literal -3
+            replacing watched literal 3 with 4 in clause ("(1 3 4 -5 6 9 -10 12 -13 14 15)")
+            replacing watched literal 3 with 8 in clause ("(3 5 8 10 -11 12 13 -14)")
+            found unit literal (9) while updating watched clauses for literal 3 in clause ("(3 9)")
+            replacing watched literal 3 with -4 in clause ("(1 3 -4 -6 7 9 10 13 -15)")
+            replacing watched literal 3 with -9 in clause ("(2 3 -9 -11 -12)")
+            replacing watched literal 3 with -11 in clause ("(3 9 -11)")
+            replacing watched literal 3 with 6 in clause ("(-2 3 6 8 10 12 -14 -15)")
+            replacing watched literal 3 with -5 in clause ("(-1 3 -5 -12)")
+            found unit literal (-10) while updating watched clauses for literal 3 in clause ("(3 -10)")
+            replacing watched literal 3 with 6 in clause ("(3 -5 6 7 -9 -14 15)")
+            replacing watched literal 3 with 6 in clause ("(3 -4 6 -8 -10 11 -13 -14)")
+            replacing watched literal 3 with -5 in clause ("(-1 3 -5 9 10 -11 -13 -14 15)")
+            replacing watched literal 3 with 8 in clause ("(3 -5 8 11 12 -13 15)")
+            found unit clause: Literal { value: 9 } in clause ("(3 9)") unit clauses rn: (-10); (3 -10); (4); (-3)
             adding to trail at decision level 0: 9
-            satisfy_clauses: clauses satisfied by literal 9: (1 3 4 -5 6 9 -10 12 -13 14 15), (1 -2 -4 5 9 -11 12 13 -14 -15), (1 -2 3 -4 5 6 7 -8 9 10 11 12 -13 -14 -15), (3 9), (1 3 -4 -6 7 9 10 13 -15), (1 -4 5 6 7 -8 9 11), (1 2 3 5 -7 9), (3 9 -11), (1 2 4 6 -7 9 10 11 12 -15), (-6 9), (1 2 3 4 5 6 7 -8 9 10 -12 -13 -14 -15), (1 2 3 -4 -5 6 -7 8 9 -10 11 12 -13 14 15), (-1 4 -5 -8 9 13 -14), (-1 3 -5 9 10 -11 -13 -14 15)
-            found unit clause: Literal { value: -10 } in clause ("(-10)")
+            updating watched clauses for literal 9
+            replacing watched literal -9 with -11 in clause ("(2 3 -9 -11 -12)")
+            replacing watched literal -9 with -10 in clause ("(-8 -9 -10)")
+            found unit clause: Literal { value: -10 } in clause ("(-10)") unit clauses rn: (3 -10); (4); (-3)
             adding to trail at decision level 0: -10
-            satisfy_clauses: clauses satisfied by literal -10: (1 2 3 -4 8 -10 -14 15), (-1 -2 3 -4 -6 -8 -10 12 13 -14 -15), (4 -10), (-8 -9 -10), (-10), (3 -10), (1 2 3 -4 6 -8 -9 -10 -12 13 14 -15), (3 -4 6 -8 -10 11 -13 -14), (-6 7 -8 -10 14), (-10 11 -14), (1 2 4 -5 7 8 -10 -11)
-            found unit clause: Literal { value: 4 } in clause ("(4)")
+            updating watched clauses for literal -10
+            found unit clause: Literal { value: 4 } in clause ("(4)") unit clauses rn: (-3)
             adding to trail at decision level 0: 4
-            satisfy_clauses: clauses satisfied by literal 4: (4 -5 -14), (4 6 -7 -9 15), (-2 4 8 -9 10 -12 -14), (1 2 4 5 6 7 -9 10 -11 12), (4), (-2 4 -6 12 13 -15)
-            found unit clause: Literal { value: -13 } in clause ("(-4 -13)")
+            updating watched clauses for literal 4
+            replacing watched literal -4 with -6 in clause ("(-4 -5 -6 -7 8 10 12 -13 15)")
+            found unit literal (-13) while updating watched clauses for literal -4 in clause ("(-4 -13)")
+            replacing watched literal -4 with -5 in clause ("(-2 -4 -5 7 -8)")
+            replacing watched literal -4 with 11 in clause ("(-1 -4 11 13)")
+            found unit clause: Literal { value: -13 } in clause ("(-4 -13)") unit clauses rn: (-3)
             adding to trail at decision level 0: -13
-            satisfy_clauses: clauses satisfied by literal -13: (-4 -5 -6 -7 8 10 12 -13 15), (5 8 -11 -12 -13 14 -15), (-4 -13), (-1 -2 3 -5 6 -7 -8 -9 11 -12 -13 14 15), (3 -5 8 11 12 -13 15)
-            found unit clause: Literal { value: 15 } in clause ("(13 15)")
+            updating watched clauses for literal -13
+            found unit literal (15) while updating watched clauses for literal 13 in clause ("(13 15)")
+            found unit clause: Literal { value: 15 } in clause ("(13 15)") unit clauses rn: (-3)
             adding to trail at decision level 0: 15
-            satisfy_clauses: clauses satisfied by literal 15: (6 -7 -12 15), (13 15), (3 -5 6 7 -9 -14 15)
-            reacting to action: Continue(Literal { value: -7 }, true) at decision level 1
+            updating watched clauses for literal 15
+            reacting to action: Continue(Literal { value: -7 }) at decision level 1
             adding to trail at decision level 1: -7
-            satisfy_clauses: clauses satisfied by literal -7: (1 -2 3 -7 -11 12 -14 -15), (1 2 -4 5 6 -7 8 -9 10 11 12 13 14 -15), (-1 2 3 6 -7 8 10 11), (-1 -5 -7 8 -11 -14)
-            reacting to action: Continue(Literal { value: -14 }, true) at decision level 2
+            updating watched clauses for literal -7
+            replacing watched literal 7 with 8 in clause ("(-2 7 8 -12 14)")
+            reacting to action: Continue(Literal { value: -14 }) at decision level 2
             adding to trail at decision level 2: -14
-            satisfy_clauses: clauses satisfied by literal -14: (3 5 8 10 -11 12 13 -14), (-5 -6 13 -14), (-2 3 6 8 10 12 -14 -15)
-            found unit clause: Literal { value: 11 } in clause ("(11 14)")
+            updating watched clauses for literal -14
+            found unit literal (11) while updating watched clauses for literal 14 in clause ("(11 14)")
+            found unit clause: Literal { value: 11 } in clause ("(11 14)") unit clauses rn: 
             adding to trail at decision level 2: 11
-            satisfy_clauses: clauses satisfied by literal 11: (11 14), (-1 -4 11 13), (-1 -6 11)
-            reacting to action: Continue(Literal { value: 2 }, true) at decision level 3
+            updating watched clauses for literal 11
+            replacing watched literal -11 with -12 in clause ("(2 3 -9 -11 -12)")
+            reacting to action: Continue(Literal { value: 2 }) at decision level 3
             adding to trail at decision level 3: 2
-            satisfy_clauses: clauses satisfied by literal 2: (2 -6 8 12), (2 3 -9 -11 -12)
-            reacting to action: Continue(Literal { value: 6 }, true) at decision level 4
+            updating watched clauses for literal 2
+            replacing watched literal -2 with -8 in clause ("(-2 -4 -5 7 -8)")
+            replacing watched literal -2 with -6 in clause ("(-2 -5 -6 7 8 -9 10 12 -15)")
+            replacing watched literal -2 with -12 in clause ("(-2 7 8 -12 14)")
+            replacing watched literal -2 with -5 in clause ("(1 -2 3 -4 -5 6 7 8 -11 -15)")
+            replacing watched literal -2 with -8 in clause ("(-2 -5 -8 -9 10 -11 14)")
+            reacting to action: Continue(Literal { value: 6 }) at decision level 4
             adding to trail at decision level 4: 6
-            satisfy_clauses: clauses satisfied by literal 6: (-5 6 12 14), (1 -2 3 -4 -5 6 7 8 -11 -15)
-            reacting to action: Continue(Literal { value: -5 }, true) at decision level 5
+            updating watched clauses for literal 6
+            replacing watched literal -6 with 8 in clause ("(-2 -5 -6 7 8 -9 10 12 -15)")
+            reacting to action: Continue(Literal { value: -5 }) at decision level 5
             adding to trail at decision level 5: -5
-            satisfy_clauses: clauses satisfied by literal -5: (-2 -4 -5 7 -8), (-2 -5 -6 7 8 -9 10 12 -15), (-1 3 -5 -12), (-2 -5 -8 -9 10 -11 14)
-            reacting to action: Continue(Literal { value: 8 }, true) at decision level 6
+            updating watched clauses for literal -5
+            reacting to action: Continue(Literal { value: 8 }) at decision level 6
             adding to trail at decision level 6: 8
-            satisfy_clauses: clauses satisfied by literal 8: (-2 7 8 -12 14)
-            reacting to action: Continue(Literal { value: 12 }, true) at decision level 7
+            updating watched clauses for literal 8
+            reacting to action: Continue(Literal { value: 12 }) at decision level 7
             adding to trail at decision level 7: 12
-            satisfy_clauses: clauses satisfied by literal 12: 
-            reacting to action: Continue(Literal { value: 1 }, true) at decision level 8
+            updating watched clauses for literal 12
+            reacting to action: Continue(Literal { value: 1 }) at decision level 8
             adding to trail at decision level 8: 1
-            satisfy_clauses: clauses satisfied by literal 1: 
+            updating watched clauses for literal 1
             Sat({1: true, 2: true, 3: false, 4: true, 5: false, 6: true, 7: false, 8: true, 9: true, 10: false, 11: true, 12: true, 13: false, 14: false, 15: true})
         "#]];
         expect.assert_eq(writer.borrow().as_ref());
@@ -530,10 +683,141 @@ mod tests {
         let res = DefaultDebug::solve_with_debug_writer(formula, Some(writer.clone()));
         writeln!(writer, "{:?}", res);
         let expect = expect![[r#"
-            found unit clause: Literal { value: 7 } in clause ("(7)")
-            would be contradiction with clause "(-7)" for literal 7
+            adding watched literals -1 and -2 for clause ("(-1 -2 -3 -4 5 6 -7 -8)")
+            adding watched literals 1 and -7 for clause ("(1 -7)")
+            adding watched literals -1 and 2 for clause ("(-1 2 3 -4 5 -6 7 8)")
+            adding watched literals 2 and -3 for clause ("(2 -3 -4 -5 -6)")
+            adding watched literals -2 and 3 for clause ("(-2 3 6 -7)")
+            adding watched literals -2 and -4 for clause ("(-2 -4 -5 6 7 8)")
+            adding watched literals 1 and 2 for clause ("(1 2 -3 -4 -5 -6 -8)")
+            adding watched literal 7 for unit clause ("(7)")
+            adding watched literals -1 and -5 for clause ("(-1 -5 -7 -8)")
+            adding watched literals -4 and -8 for clause ("(-4 -8)")
+            adding watched literals 3 and 4 for clause ("(3 4)")
+            adding watched literals -2 and -8 for clause ("(-2 -8)")
+            adding watched literals -1 and 2 for clause ("(-1 2 3 -4 6)")
+            adding watched literals -1 and 2 for clause ("(-1 2 3 -4 5 -6 -7 -8)")
+            adding watched literals 1 and 2 for clause ("(1 2 6 7)")
+            adding watched literals -1 and 3 for clause ("(-1 3 6)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 3 -4 5 -6 -7 -8)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 3 -5 8)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 3 -4 -5 6)")
+            adding watched literal 4 for unit clause ("(4)")
+            adding watched literals 2 and -4 for clause ("(2 -4 -5 6 7 -8)")
+            adding watched literals 1 and -8 for clause ("(1 -8)")
+            adding watched literal 4 for unit clause ("(4)")
+            adding watched literals 2 and 3 for clause ("(2 3 4 -5 6 7 -8)")
+            adding watched literals -3 and 4 for clause ("(-3 4 6 -8)")
+            adding watched literals 2 and -3 for clause ("(2 -3 -4 6 7)")
+            adding watched literal -4 for unit clause ("(-4)")
+            adding watched literal 1 for unit clause ("(1)")
+            adding watched literals 1 and 3 for clause ("(1 3 -5 -6)")
+            adding watched literals 4 and 5 for clause ("(4 5 6 7 -8)")
+            adding watched literals -1 and 2 for clause ("(-1 2 -3 4 5 -6 -7 -8)")
+            adding watched literals 1 and 2 for clause ("(1 2 3 -4 5 6 7 -8)")
+            adding watched literals 2 and -3 for clause ("(2 -3 -4 5 -6 7 -8)")
+            adding watched literals -1 and 2 for clause ("(-1 2 3 -6 -7 -8)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 3 -4 -6)")
+            adding watched literals 2 and -4 for clause ("(2 -4 5 6)")
+            adding watched literals -3 and 6 for clause ("(-3 6)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 3 -4 -8)")
+            adding watched literals 2 and -3 for clause ("(2 -3 -4 -6 -7 -8)")
+            adding watched literals -1 and 2 for clause ("(-1 2 3 -4 -5 6 7 -8)")
+            adding watched literals -1 and 4 for clause ("(-1 4 5 -6 8)")
+            adding watched literals 4 and -5 for clause ("(4 -5 -7)")
+            adding watched literals 1 and 2 for clause ("(1 2 3 -4 6 -7 -8)")
+            adding watched literal -1 for unit clause ("(-1)")
+            adding watched literals 1 and 2 for clause ("(1 2 3 4 5 -6 7 -8)")
+            adding watched literal -7 for unit clause ("(-7)")
+            adding watched literals 2 and -4 for clause ("(2 -4 -6 7 -8)")
+            adding watched literal -2 for unit clause ("(-2)")
+            adding watched literals -3 and -6 for clause ("(-3 -6 -8)")
+            adding watched literals -1 and 2 for clause ("(-1 2 3 4 5 -6 -8)")
+            adding watched literals 5 and 6 for clause ("(5 6)")
+            adding watched literals 6 and 7 for clause ("(6 7)")
+            adding watched literals -5 and 6 for clause ("(-5 6 -7)")
+            adding watched literals -1 and 3 for clause ("(-1 3 5 6 -8)")
+            adding watched literals 2 and -4 for clause ("(2 -4 5 7 8)")
+            adding watched literals -1 and 3 for clause ("(-1 3 4 5)")
+            adding watched literals 1 and -2 for clause ("(1 -2 -3 5 -6 -7 -8)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 -3 4 5)")
+            adding watched literals -1 and 2 for clause ("(-1 2 -3 -4 5 -6 -8)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 3 4 7 -8)")
+            adding watched literals -2 and 3 for clause ("(-2 3)")
+            adding watched literals -1 and 3 for clause ("(-1 3 -4 5 -6 -8)")
+            adding watched literals 1 and 2 for clause ("(1 2)")
+            adding watched literals 1 and 2 for clause ("(1 2 3 -4 5 6 7 8)")
+            adding watched literals 1 and 2 for clause ("(1 2 -4 5 6 -7 -8)")
+            adding watched literals 1 and -2 for clause ("(1 -2 -3 -4 -5 6 8)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 -3 -4 -5 6 7 -8)")
+            adding watched literals -1 and 2 for clause ("(-1 2 4 -6 -7 -8)")
+            adding watched literals 4 and 5 for clause ("(4 5)")
+            adding watched literals 2 and -3 for clause ("(2 -3 -8)")
+            adding watched literals 2 and -5 for clause ("(2 -5 -8)")
+            adding watched literals -1 and 2 for clause ("(-1 2 -5 -6)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 3 -4 -7 -8)")
+            adding watched literals -3 and -7 for clause ("(-3 -7 -8)")
+            adding watched literals 2 and -3 for clause ("(2 -3 5 -6 -8)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 3 -4 -5 -6 -7)")
+            adding watched literals 1 and -2 for clause ("(1 -2 3 -4 -5 6 -7 -8)")
+            adding watched literals -2 and -5 for clause ("(-2 -5 -7 8)")
+            adding watched literals 1 and 4 for clause ("(1 4 -7)")
+            adding watched literals 2 and -6 for clause ("(2 -6 8)")
+            adding watched literals 1 and -2 for clause ("(1 -2 -3 -4 5 -6 7 -8)")
+            adding watched literal -4 for unit clause ("(-4)")
+            adding watched literals 2 and 5 for clause ("(2 5 6 7 8)")
+            adding watched literals 1 and -4 for clause ("(1 -4)")
+            adding watched literals 2 and 3 for clause ("(2 3 -4 -6 7 -8)")
+            adding watched literals -1 and 2 for clause ("(-1 2 3 -4 -5 -6 7 -8)")
+            adding watched literals 1 and -2 for clause ("(1 -2 3 4 5 6 7 -8)")
+            adding watched literals -5 and -6 for clause ("(-5 -6 -7)")
+            adding watched literals -1 and 2 for clause ("(-1 2 3 4 5 6 7 -8)")
+            adding watched literals -2 and 3 for clause ("(-2 3 -4 -5 -6 -7 -8)")
+            adding watched literals 4 and 8 for clause ("(4 8)")
+            adding watched literals 1 and 2 for clause ("(1 2 -3 4 -5 -6 7 -8)")
+            adding watched literal -8 for unit clause ("(-8)")
+            adding watched literals 4 and -5 for clause ("(4 -5 6)")
+            adding watched literals 1 and -2 for clause ("(1 -2)")
+            adding watched literals 4 and -5 for clause ("(4 -5 -6 7 -8)")
+            adding watched literals -3 and -5 for clause ("(-3 -5 -7)")
+            adding watched literals 1 and -2 for clause ("(1 -2 -3 -6 7 8)")
+            adding watched literals 2 and 4 for clause ("(2 4 7)")
+            adding watched literals -1 and 2 for clause ("(-1 2 -5 -7 -8)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 -5 -6 8)")
+            adding watched literals 1 and 2 for clause ("(1 2 3 -5 -6 7 8)")
+            adding watched literals 5 and 6 for clause ("(5 6 8)")
+            adding watched literals 1 and -2 for clause ("(1 -2 -4 5 -6 7 -8)")
+            adding watched literal 6 for unit clause ("(6)")
+            adding watched literals 2 and 5 for clause ("(2 5 -7)")
+            adding watched literals 1 and 2 for clause ("(1 2 -4 5 -6 7)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 -3 -4 -5 -6 -7 8)")
+            adding watched literals 1 and 2 for clause ("(1 2 5 7 -8)")
+            adding watched literals -1 and 2 for clause ("(-1 2 -3 -4 5 6 7 -8)")
+            adding watched literals 1 and 2 for clause ("(1 2 -3 -4 6 7 8)")
+            adding watched literal 5 for unit clause ("(5)")
+            adding watched literals 1 and -2 for clause ("(1 -2 4 5 7 -8)")
+            adding watched literals 2 and -4 for clause ("(2 -4)")
+            adding watched literals -1 and 7 for clause ("(-1 7)")
+            adding watched literals 1 and 2 for clause ("(1 2 3 -4 -5 -6 -7 8)")
+            adding watched literals 7 and -8 for clause ("(7 -8)")
+            adding watched literal -8 for unit clause ("(-8)")
+            adding watched literals 1 and 3 for clause ("(1 3 8)")
+            adding watched literals -1 and 2 for clause ("(-1 2 -3 6 7 -8)")
+            adding watched literals 2 and -4 for clause ("(2 -4)")
+            adding watched literals 3 and 5 for clause ("(3 5 -7 8)")
+            adding watched literals 1 and 2 for clause ("(1 2 -3 -4 5 -6 -7)")
+            adding watched literals 1 and 3 for clause ("(1 3 4 -5 -6 7 -8)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 -3 4 5 -6 7 -8)")
+            adding watched literals -2 and -3 for clause ("(-2 -3 -4 -8)")
+            adding watched literals 3 and 6 for clause ("(3 6)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 -3 -4 -6 -7 8)")
+            adding watched literals 1 and 2 for clause ("(1 2 -3 -4 5 -6 7 8)")
+            adding watched literals -1 and 3 for clause ("(-1 3 4 -5 -8)")
+            adding watched literals -1 and -2 for clause ("(-1 -2 3 7 -8)")
+            found unit clause: Literal { value: 7 } in clause ("(7)") unit clauses rn: (4); (4); (-4); (1); (-1); (-7); (-2); (-4); (-8); (6); (5); (-8)
             adding to trail at decision level 0: 7
-            satisfy_clauses: clauses satisfied by literal 7: (-1 2 3 -4 5 -6 7 8), (-2 -4 -5 6 7 8), (7), (1 2 6 7), (2 -4 -5 6 7 -8), (2 3 4 -5 6 7 -8), (2 -3 -4 6 7), (4 5 6 7 -8), (1 2 3 -4 5 6 7 -8), (2 -3 -4 5 -6 7 -8), (-1 2 3 -4 -5 6 7 -8), (1 2 3 4 5 -6 7 -8), (2 -4 -6 7 -8), (6 7), (2 -4 5 7 8), (-1 -2 3 4 7 -8), (1 2 3 -4 5 6 7 8), (-1 -2 -3 -4 -5 6 7 -8), (1 -2 -3 -4 5 -6 7 -8), (2 5 6 7 8), (2 3 -4 -6 7 -8), (-1 2 3 -4 -5 -6 7 -8), (1 -2 3 4 5 6 7 -8), (-1 2 3 4 5 6 7 -8), (1 2 -3 4 -5 -6 7 -8), (4 -5 -6 7 -8), (1 -2 -3 -6 7 8), (2 4 7), (1 2 3 -5 -6 7 8), (1 -2 -4 5 -6 7 -8), (1 2 -4 5 -6 7), (1 2 5 7 -8), (-1 2 -3 -4 5 6 7 -8), (1 2 -3 -4 6 7 8), (1 -2 4 5 7 -8), (-1 7), (7 -8), (-1 2 -3 6 7 -8), (1 3 4 -5 -6 7 -8), (-1 -2 -3 4 5 -6 7 -8), (1 2 -3 -4 5 -6 7 8), (-1 -2 3 7 -8)
+            updating watched clauses for literal 7
+            found unit literal (1) while updating watched clauses for literal -7 in clause ("(1 -7)")
             reacting to action: Contradiction(45) at decision level 0
             Unsat
         "#]];
