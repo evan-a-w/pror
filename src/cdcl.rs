@@ -98,9 +98,8 @@ pub struct State<Config: ConfigT> {
     watched_clauses: Vec<TfPair<BTreeMap<ClauseIdx, Generation>>>,
     ready_for_unit_prop: Config::BitSet,
     trail: Vec<TrailEntry>,
-    unassigned_variables: Config::BitSet,
     num_initial_clauses: usize,
-    clauses_by_var: Vec<Config::BitSet>,
+    clauses_by_var: Vec<TfPair<Config::BitSet>>,
     trail_entry_idx_by_var: Vec<Option<usize>>,
     scratch_clause_bitset: Option<Config::BitSet>,
     scratch_variable_bitset: Option<Config::BitSet>,
@@ -155,6 +154,8 @@ impl<Config: ConfigT> State<Config> {
         }
     }
 
+    fn clear_from_clauses(&mut self, literal: Literal) {}
+
     fn delete_clause(&mut self, idx: usize) {
         let mut next_variable = 0;
         loop {
@@ -166,7 +167,8 @@ impl<Config: ConfigT> State<Config> {
                 None => break,
                 Some(variable) => {
                     next_variable = variable;
-                    self.clauses_by_var[variable].clear(idx);
+                    let value = !self.clauses[idx].value_exn().negatives.contains(variable);
+                    self.clauses_by_var[variable][value].clear(idx);
                 }
             }
         }
@@ -219,11 +221,11 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn clauses_mut(&mut self, literal: Literal) -> &mut Config::BitSet {
-        &mut self.clauses_by_var[literal.variable()]
+        &mut self.clauses_by_var[literal.variable()][literal.value()]
     }
 
     fn clauses(&self, literal: Literal) -> &Config::BitSet {
-        &self.clauses_by_var[literal.variable()]
+        &self.clauses_by_var[literal.variable()][literal.value()]
     }
 
     fn undo_entry(&mut self, trail_entry: &mut TrailEntry) {
@@ -233,9 +235,10 @@ impl<Config: ConfigT> State<Config> {
             trail_entry.literal.to_string(),
             trail_entry.decision_level
         );
+        for clause in &mut self.clauses_mut(trail_entry.literal) {
+            clause.variables.set(trail_entry.literal.variable());
+        }
         self.trail_entry_idx_by_var[trail_entry.literal.variable()] = None;
-        self.unassigned_variables
-            .set(trail_entry.literal.variable());
         match trail_entry.reason {
             Reason::Decision(_) => (),
             Reason::ClauseIdx(clause_idx) => {
@@ -255,10 +258,7 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn is_satisfied(&self, clause: &Clause<Config::BitSet>) -> bool {
-        clause.iter_literals().any(|lit| {
-            !self.unassigned_variables.contains(lit.variable())
-                && self.assignments.contains(lit.variable()) == lit.value()
-        })
+        clause.variables.first_set().is_none()
     }
 
     fn remove_watched_clause_due_to_generation_mismatch(
@@ -313,7 +313,6 @@ impl<Config: ConfigT> State<Config> {
                     !self
                         .watched_clauses(lit)
                         .contains_key(&ClauseIdx(clause_idx))
-                        && self.unassigned_variables.contains(lit.variable())
                 })
                 .next();
             match replace {
@@ -358,6 +357,9 @@ impl<Config: ConfigT> State<Config> {
             trail_entry.decision_level,
             trail_entry.literal.to_string()
         );
+        for clause in self.clauses_mut(trail_entry.literal).iter() {
+            clause.variables.clear(trail_entry.literal.variable());
+        }
         let literal = trail_entry.literal;
         let var = literal.variable();
         if literal.value() {
@@ -378,7 +380,6 @@ impl<Config: ConfigT> State<Config> {
             }
         };
         self.trail_entry_idx_by_var[var] = Some(self.trail.len());
-        self.unassigned_variables.clear(var);
         self.trail.push(trail_entry);
         self.update_watched_clauses(literal)
     }
@@ -766,47 +767,13 @@ impl<Config: ConfigT> State<Config> {
         generation: Generation,
         watched_clauses: &mut Vec<TfPair<BTreeMap<ClauseIdx, Generation>>>,
         ready_for_unit_prop: &mut Config::BitSet,
-        unassigned_variables: &Config::BitSet,
     ) {
-        let mut unassigned_lits = clause
-            .variables
-            .iter_intersection(unassigned_variables)
-            .map(|var| Literal::new(var, !clause.negatives.contains(var)));
-        let mut assigned_lits = clause
-            .variables
-            .iter_difference(unassigned_variables)
-            .map(|var| Literal::new(var, !clause.negatives.contains(var)));
+        let mut unassigned_lits = clause.iter_literals();
         match (
             unassigned_lits.next(),
             unassigned_lits.next(),
-            assigned_lits.next(),
-            assigned_lits.next(),
         ) {
-            (None, None, None, None) => (),
-            (None, None, Some(lit), None) => {
-                watched_clauses[lit.variable()][lit.value()]
-                    .insert(ClauseIdx(clause_idx), generation);
-            }
-            (None, None, Some(lit1), Some(lit2)) => {
-                watched_clauses[lit1.variable()][lit1.value()]
-                    .insert(ClauseIdx(clause_idx), generation);
-                watched_clauses[lit2.variable()][lit2.value()]
-                    .insert(ClauseIdx(clause_idx), generation);
-            }
-            (Some(lit), None, Some(lit2), _) => {
-                watched_clauses[lit.variable()][lit.value()]
-                    .insert(ClauseIdx(clause_idx), generation);
-                watched_clauses[lit2.variable()][lit2.value()]
-                    .insert(ClauseIdx(clause_idx), generation);
-                debug!(
-                    debug_writer,
-                    "adding watched literal {} for unit clause ({:?})",
-                    lit.to_string(),
-                    clause.to_string()
-                );
-                ready_for_unit_prop.set(clause_idx);
-            }
-            (Some(lit), None, None, None) => {
+            (Some(lit), None) => {
                 watched_clauses[lit.variable()][lit.value()]
                     .insert(ClauseIdx(clause_idx), generation);
                 debug!(
@@ -817,7 +784,7 @@ impl<Config: ConfigT> State<Config> {
                 );
                 ready_for_unit_prop.set(clause_idx);
             }
-            (Some(a), Some(b), _, _) => {
+            (Some(a), Some(b)) => {
                 debug!(
                     debug_writer,
                     "adding watched literals {} and {} for clause ({:?})",
@@ -840,7 +807,6 @@ impl<Config: ConfigT> State<Config> {
             self.clauses[clause_idx].generation().clone(),
             &mut self.watched_clauses,
             &mut self.ready_for_unit_prop,
-            &self.unassigned_variables,
         )
     }
 
@@ -904,7 +870,6 @@ impl<Config: ConfigT> State<Config> {
                 0,
                 &mut watched_clauses,
                 &mut ready_for_unit_prop,
-                &variables_bitset,
             );
         }
         let immediate_result = if instantly_unsat {
@@ -933,7 +898,6 @@ impl<Config: ConfigT> State<Config> {
             clauses,
             num_initial_clauses,
             trail: Vec::with_capacity(64),
-            unassigned_variables,
             watched_clauses,
             clauses_by_var,
             trail_entry_idx_by_var: vec![None; num_vars],

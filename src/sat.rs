@@ -19,6 +19,7 @@ pub enum StepResult {
 #[derive(Debug)]
 pub struct Clause<BitSet: BitSetT> {
     pub variables: BitSet,
+    pub variables_incl_set: BitSet,
     pub negatives: BitSet,
     pub tautology: bool,
     pub num_units: usize,
