@@ -584,7 +584,7 @@ impl<Config: ConfigT> State<Config> {
             }
             self.add_vsids_activity(self.trail[trail_entry_idx].literal);
             match reason {
-                Reason::Decision(_) => assert!(false), // never reach this
+                Reason::Decision(_) => assert!(false, "found decision walking back from conflict"),
                 Reason::ClauseIdx(clause_idx) => {
                     rescale = rescale || self.add_clause_activity(clause_idx);
                     let trail_entry = &self.trail[trail_entry_idx];
@@ -649,11 +649,15 @@ impl<Config: ConfigT> State<Config> {
 
     fn backtrack(&mut self, failed_clause_idx: ClauseIdx) {
         let learned_clause = self.learn_clause_from_failure(failed_clause_idx);
+        learned_clause.iter_literals().for_each(|lit| 
+            self.add_vsids_activity(lit)
+        );
         let remove_greater_than = self.second_highest_decision_level(&learned_clause);
         for lit in learned_clause.iter_literals() {
             let len = self.clauses.len();
             self.clauses_mut(lit).set(len);
         }
+        self.decay_vsids_activities();
         self.remove_from_trail_helper(Some(remove_greater_than));
         let clause_idx = self.push_clause(learned_clause);
         self.ready_for_unit_prop.clear_all();
@@ -785,7 +789,6 @@ impl<Config: ConfigT> State<Config> {
             );
             self.simplify_clauses();
             self.decay_clause_activities();
-            self.decay_vsids_activities();
         };
         if let Some(res) = self.immediate_result.take() {
             return StepResult::Done(res);
@@ -1143,6 +1146,6 @@ impl ConfigT for VsidsConfigDebug {
     const DEBUG: bool = true;
 }
 
-pub type Default = State<RandomConfig>;
-// pub type Default = State<VsidsConfig>;
+// pub type Default = State<RandomConfig>;
+pub type Default = State<VsidsConfig>;
 pub type DefaultDebug = State<VsidsConfigDebug>;
