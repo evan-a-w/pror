@@ -1,5 +1,6 @@
 use crate::bitset::{BTreeBitSet, BitSetT};
 use crate::fixed_bitset;
+use crate::luby::Luby;
 use crate::pool::Pool;
 use crate::sat::*;
 use crate::tombstone::*;
@@ -86,6 +87,8 @@ impl<T> std::ops::IndexMut<bool> for TfPair<T> {
 }
 
 pub struct State<Config: ConfigT> {
+    luby: Luby,
+    conflicts: u64,
     cla_inc: f64,
     cla_decay_factor: f64,
     cla_activity_rescale: f64,
@@ -622,8 +625,26 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn restart(&mut self) {
+        debug!(self.debug_writer, "Restarting");
         self.ready_for_unit_prop.clear_all();
-        self.trail.clear();
+        while let Some(mut trail_entry) = self.trail.pop() {
+            self.undo_entry(&mut trail_entry);
+        }
+        for (clause_idx, clause) in self
+            .clauses
+            .iter()
+            .enumerate()
+            .filter_map(|(i, x)| x.value().map(|v| (i, v)))
+        {
+            if let Some(_) = self.try_get_unit_literal(clause) {
+                debug!(
+                    self.debug_writer,
+                    "Found unit after restart in clause {}",
+                    self.clause_string(ClauseIdx(clause_idx))
+                );
+                self.ready_for_unit_prop.set(clause_idx);
+            }
+        }
     }
 
     fn remove_from_trail_helper(&mut self, remove_greater_than: Option<usize>) {
@@ -654,9 +675,9 @@ impl<Config: ConfigT> State<Config> {
 
     fn backtrack(&mut self, failed_clause_idx: ClauseIdx) {
         let learned_clause = self.learn_clause_from_failure(failed_clause_idx);
-        learned_clause.iter_literals().for_each(|lit| 
-            self.add_vsids_activity(lit)
-        );
+        learned_clause
+            .iter_literals()
+            .for_each(|lit| self.add_vsids_activity(lit));
         let remove_greater_than = self.second_highest_decision_level(&learned_clause);
         for lit in learned_clause.iter_literals() {
             let len = self.clauses.len();
@@ -693,7 +714,12 @@ impl<Config: ConfigT> State<Config> {
                 StepResult::Done(SatResult::Unsat)
             }
             Action::Contradiction(failed_idx) => {
+                self.conflicts += 1;
                 self.backtrack(ClauseIdx(failed_idx));
+                if self.conflicts >= self.luby.value() {
+                    self.conflicts = 0;
+                    self.restart();
+                }
                 StepResult::Continue
             }
         }
@@ -773,16 +799,6 @@ impl<Config: ConfigT> State<Config> {
         if self.iterations % self.simplify_clauses_every == 0 {
             debug!(
                 self.debug_writer,
-                "simplifying clauses at iteration {}, num clauses {}, level {}",
-                self.iterations,
-                self.clauses
-                    .iter()
-                    .filter_map(|x| x.value())
-                    .collect::<Vec<_>>()
-                    .len(),
-                self.decision_level
-            );
-            println!(
                 "simplifying clauses at iteration {}, num clauses {}, level {}",
                 self.iterations,
                 self.clauses
@@ -1007,6 +1023,8 @@ impl<Config: ConfigT> State<Config> {
             .collect::<BTreeSet<_>>();
 
         State {
+            luby: Luby::new(32),
+            conflicts: 0,
             score_for_literal,
             literal_by_score,
             cla_decay_factor: 0.75,

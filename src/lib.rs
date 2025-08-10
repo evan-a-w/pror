@@ -7,6 +7,7 @@ pub mod sat;
 pub mod dimacs;
 pub mod shared_string_writer;
 pub mod tombstone;
+pub mod luby;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
