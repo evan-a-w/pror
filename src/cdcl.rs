@@ -1004,7 +1004,7 @@ impl<Config: ConfigT> State<Config> {
             cla_decay_factor: 0.75,
             cla_activity_rescale: 1e20,
             cla_inc: 1.0,
-            vsids_decay_factor: 0.75,
+            vsids_decay_factor: 0.99,
             vsids_activity_rescale: 1e20,
             vsids_inc: 1.0,
             clauses_first_tombstone: None,
@@ -1143,6 +1143,6 @@ impl ConfigT for VsidsConfigDebug {
     const DEBUG: bool = true;
 }
 
-// pub type Default = State<RandomConfig>;
-pub type Default = State<VsidsConfig>;
+pub type Default = State<RandomConfig>;
+// pub type Default = State<VsidsConfig>;
 pub type DefaultDebug = State<VsidsConfigDebug>;
