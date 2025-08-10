@@ -1122,9 +1122,7 @@ fn choose_vsids_literal<T: ConfigT>(state: &mut State<T>) -> Option<Literal> {
 }
 
 impl ConfigT for RandomConfig {
-    // type BitSet = fixed_bitset::DefaultMapBitSet;
-    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
-    // type BitSet = BTreeBitSet;
+    type BitSet = fixed_bitset::BitSet;
 
     fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
         choose_random_literal(state)
@@ -1134,9 +1132,7 @@ impl ConfigT for RandomConfig {
 }
 
 impl ConfigT for RandomConfigDebug {
-    // type BitSet = fixed_bitset::DefaultMapBitSet;
-    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
-    // type BitSet = BTreeBitSet;
+    type BitSet = fixed_bitset::BitSet;
 
     fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
         choose_random_literal(state)
@@ -1146,9 +1142,7 @@ impl ConfigT for RandomConfigDebug {
 }
 
 impl ConfigT for VsidsConfig {
-    // type BitSet = fixed_bitset::DefaultMapBitSet;
-    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
-    // type BitSet = BTreeBitSet;
+    type BitSet = fixed_bitset::BitSet;
 
     fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
         choose_vsids_literal(state)
@@ -1158,9 +1152,7 @@ impl ConfigT for VsidsConfig {
 }
 
 impl ConfigT for VsidsConfigDebug {
-    // type BitSet = fixed_bitset::DefaultMapBitSet;
-    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
-    // type BitSet = BTreeBitSet;
+    type BitSet = fixed_bitset::BitSet;
 
     fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
         choose_vsids_literal(state)

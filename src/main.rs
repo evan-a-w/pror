@@ -208,8 +208,8 @@ fn subsets_100_eg() {
 }
 
 fn useless_set_thing() {
-    let mut a = DefaultBitSet::create();
-    let mut b = DefaultBitSet::create();
+    let mut a = BitSet::create();
+    let mut b = BitSet::create();
     a.set(1);
     a.set(3);
     a.set(101024);
