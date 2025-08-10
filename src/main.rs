@@ -234,7 +234,7 @@ pub fn main() {
     // factor_sat_eg();
     // factor_unsat_eg();
 
-    subsets_100_eg();
+    // subsets_100_eg();
 
-    // fail_eg();
+    fail_eg();
 }
