@@ -229,18 +229,18 @@ pub fn main() {
     // stepped1();
     // stepped3();
 
-    // wikipedia();
-    // long();
-    // succ_eg();
-    // sudoku();
-    // simple();
+    wikipedia();
+    long();
+    succ_eg();
+    sudoku();
+    simple();
 
-    // factor_sat_eg();
-    // factor_unsat_eg();
+    factor_sat_eg();
+    factor_unsat_eg();
 
-    // subsets_100_eg();
+    subsets_100_eg();
 
-    // fail_eg();
+    fail_eg();
 
-    useless_set_thing();
+    // useless_set_thing();
 }
