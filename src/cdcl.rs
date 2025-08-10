@@ -22,7 +22,6 @@ pub trait ConfigT: Sized {
 
 #[macro_export]
 macro_rules! debug {
-    // With optional writer
     ($writer:expr, $($arg:tt)+) => {
         if Config::DEBUG {
             match $writer {
@@ -37,7 +36,6 @@ macro_rules! debug {
         }
     };
 
-    // Fallback: no writer provided
     ($($arg:tt)+) => {
         if Config::DEBUG {
             eprintln!($($arg)+);
@@ -65,7 +63,6 @@ struct TfPair<T> {
 impl<T> std::ops::Index<bool> for TfPair<T> {
     type Output = T;
 
-    // Required method
     fn index(&self, index: bool) -> &Self::Output {
         if index {
             &self.first
@@ -76,7 +73,6 @@ impl<T> std::ops::Index<bool> for TfPair<T> {
 }
 
 impl<T> std::ops::IndexMut<bool> for TfPair<T> {
-    // Required method
     fn index_mut(&mut self, index: bool) -> &mut T {
         if index {
             &mut self.first
