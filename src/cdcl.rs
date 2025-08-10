@@ -621,6 +621,11 @@ impl<Config: ConfigT> State<Config> {
         learned
     }
 
+    fn restart(&mut self) {
+        self.ready_for_unit_prop.clear_all();
+        self.trail.clear();
+    }
+
     fn remove_from_trail_helper(&mut self, remove_greater_than: Option<usize>) {
         let mut trail_entry: Option<TrailEntry> = None;
         loop {
@@ -1007,7 +1012,7 @@ impl<Config: ConfigT> State<Config> {
             cla_decay_factor: 0.75,
             cla_activity_rescale: 1e20,
             cla_inc: 1.0,
-            vsids_decay_factor: 0.99,
+            vsids_decay_factor: 0.95,
             vsids_activity_rescale: 1e20,
             vsids_inc: 1.0,
             clauses_first_tombstone: None,
