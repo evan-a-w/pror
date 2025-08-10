@@ -61,8 +61,7 @@ pub trait BitSetT {
         })
     }
 
-    // TODO: try specialize and make faster
-    fn intersect_first_set_ge(&self, other: &impl BitSetT, ge: usize) -> Option<usize> {
+    fn intersect_first_set_ge(&self, other: &Self, ge: usize) -> Option<usize> {
         match (self.first_set_ge(ge), other.first_set_ge(ge)) {
             (Some(a), Some(b)) if a == b => Some(a),
             (Some(a), Some(b)) if a < b => self.intersect_first_set_ge(other, b),
@@ -71,7 +70,7 @@ pub trait BitSetT {
         }
     }
 
-    fn intersect_first_set(&self, other: &impl BitSetT) -> Option<usize> {
+    fn intersect_first_set(&self, other: &Self) -> Option<usize> {
         self.intersect_first_set_ge(other, 0)
     }
 

@@ -212,29 +212,35 @@ fn useless_set_thing() {
     let mut b = DefaultBitSet::create();
     a.set(1);
     a.set(3);
+    a.set(101024);
     a.set(323213123);
+    b.set(1);
+    b.set(2);
+    b.set(3);
     b.set(10);
     b.set(101024);
-    a.iter_union(&b).for_each(|x| {
+    b.set(323213123);
+    a.iter_intersection_ge(&b, 101024).for_each(|x| {
         println!("x: {}", x);
     });
 }
-
 
 pub fn main() {
     // stepped1();
     // stepped3();
 
-    wikipedia();
-    long();
-    succ_eg();
-    sudoku();
-    simple();
+    // wikipedia();
+    // long();
+    // succ_eg();
+    // sudoku();
+    // simple();
 
-    factor_sat_eg();
-    factor_unsat_eg();
+    // factor_sat_eg();
+    // factor_unsat_eg();
 
-    subsets_100_eg();
+    // subsets_100_eg();
 
-    fail_eg();
+    // fail_eg();
+
+    useless_set_thing();
 }

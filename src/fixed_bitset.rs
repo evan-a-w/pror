@@ -337,6 +337,53 @@ where
             .chain(extra)
     }
 
+    pub fn iter_intersection_ge<'a>(
+        &'a self,
+        other: &'a Self,
+        ge: usize,
+    ) -> impl Iterator<Item = usize> + 'a {
+        let min = self.storage.block_count().min(other.storage.block_count());
+        let first_block = ge / Self::BITS_PER_BLOCK;
+        let first_block_iter = (first_block..min.min(first_block + 1)).flat_map(move |b| {
+            Self::iter_bit_indices(
+                self.storage
+                    .block(b)
+                    .iter()
+                    .enumerate()
+                    .zip(other.storage.block(b).iter())
+                    .map(move |((i, &a), &b)| {
+                        if i == 0 {
+                            let num_to_zero = ge % Self::BITS_PER_BLOCK;
+                            if num_to_zero == usize::BITS as usize {
+                                println!("max {num_to_zero}");
+                                0
+                            } else if num_to_zero == (usize::BITS - 1) as usize {
+                                println!("less max {num_to_zero}");
+                                a & b & (1 << num_to_zero)
+                            } else {
+                                println!("less less max {num_to_zero}");
+                                a & b & !((1 << num_to_zero) - 1)
+                            }
+                        } else {
+                            a & b
+                        }
+                    }),
+                b,
+            )
+        });
+        let non_cut_off = ((first_block + 1)..min).flat_map(move |b| {
+            Self::iter_bit_indices(
+                self.storage
+                    .block(b)
+                    .iter()
+                    .zip(other.storage.block(b).iter())
+                    .map(move |(&a, &b)| a & b),
+                b,
+            )
+        });
+        first_block_iter.chain(non_cut_off)
+    }
+
     pub fn iter_intersection<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = usize> + 'a {
         let min = self.storage.block_count().min(other.storage.block_count());
         (0..min).flat_map(move |b| {
@@ -491,6 +538,13 @@ impl<S, const N: usize> BitSetT for BitSet<S, N>
 where
     S: BlockStorage<N> + Clone,
 {
+    fn intersect_first_set_ge(&self, other: &Self, ge: usize) -> Option<usize> {
+        self.iter_intersection_ge(other, ge).next()
+    }
+    fn intersect_first_set(&self, other: &Self) -> Option<usize> {
+        self.iter_intersection(other).next()
+    }
+
     fn grow(&mut self, bits: usize) {
         self.grow(bits);
     }
