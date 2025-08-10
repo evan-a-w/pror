@@ -19,11 +19,12 @@ pub enum StepResult {
 #[derive(Debug)]
 pub struct Clause<BitSet: BitSetT> {
     pub variables: BitSet,
-    pub variables_incl_set: BitSet,
+    pub all_variables: BitSet,
     pub negatives: BitSet,
     pub tautology: bool,
     pub num_units: usize,
     pub score: f64,
+    pub satisfied: usize,
 }
 
 pub fn satisfies<BitSet: BitSetT>(
@@ -42,22 +43,30 @@ pub fn satisfies<BitSet: BitSetT>(
 }
 
 impl<BitSet: BitSetT> Clause<BitSet> {
+    pub fn is_satisfied(&self) -> bool {
+        self.satisfied > 0
+    }
+
     pub fn empty() -> Self {
         Clause {
             variables: BitSet::create(),
+            all_variables: BitSet::create(),
             negatives: BitSet::create(),
             tautology: false,
             num_units: 0,
             score: 0.0,
+            satisfied: 0,
         }
     }
-    pub fn create(variables: BitSet, negatives: BitSet) -> Self {
+    pub fn create(variables: BitSet, all_variables: BitSet, negatives: BitSet) -> Self {
         Clause {
             variables,
+            all_variables,
             negatives,
             tautology: false,
             num_units: 0,
             score: 0.0,
+            satisfied: 0,
         }
     }
 
@@ -78,15 +87,19 @@ impl<BitSet: BitSetT> Clause<BitSet> {
 
     pub fn copy(&self, bitset_pool: &mut Pool<BitSet>) -> Self {
         let mut variables = bitset_pool.acquire(|| BitSet::create());
+        let mut all_variables = bitset_pool.acquire(|| BitSet::create());
         let mut negatives = bitset_pool.acquire(|| BitSet::create());
         variables.intersect(&self.variables, &self.variables);
+        all_variables.intersect(&self.all_variables, &self.all_variables);
         negatives.intersect(&self.negatives, &self.negatives);
         Clause {
             variables,
+            all_variables,
             negatives,
             tautology: self.tautology,
             num_units: 0,
             score: 0.0,
+            satisfied: 0,
         }
     }
 
@@ -163,9 +176,11 @@ impl<BitSet: BitSetT> Formula<BitSet> {
 
         for clause in formula {
             let mut variables = bitset_pool.acquire(|| BitSet::create());
+            let mut all_variables = bitset_pool.acquire(|| BitSet::create());
             let mut negatives = bitset_pool.acquire(|| BitSet::create());
             let mut tautology = false;
             variables.clear_all();
+            all_variables.clear_all();
             negatives.clear_all();
 
             for lit in clause {
@@ -177,6 +192,7 @@ impl<BitSet: BitSetT> Formula<BitSet> {
                     tautology = true;
                 }
                 variables.set(var);
+                all_variables.set(var);
                 if lit < 0 {
                     negatives.set(var);
                 }
@@ -188,11 +204,13 @@ impl<BitSet: BitSetT> Formula<BitSet> {
             }
 
             clauses.push(Clause {
+                all_variables,
                 variables,
                 negatives,
                 tautology,
                 num_units: 0,
                 score: 0.0,
+                satisfied: 0,
             });
         }
 

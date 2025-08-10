@@ -101,8 +101,6 @@ pub struct State<Config: ConfigT> {
     num_initial_clauses: usize,
     clauses_by_var: Vec<TfPair<Config::BitSet>>,
     trail_entry_idx_by_var: Vec<Option<usize>>,
-    scratch_clause_bitset: Option<Config::BitSet>,
-    scratch_variable_bitset: Option<Config::BitSet>,
     decision_level: usize,
     bitset_pool: Pool<Config::BitSet>,
     iterations: usize,
@@ -199,16 +197,10 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn try_get_unit_literal(&self, clause: &Clause<Config::BitSet>) -> Option<Literal> {
-        match self
-            .unassigned_variables
-            .intersect_first_set(&clause.variables)
-        {
+        match clause.variables.first_set() {
             // exactly one unset -> unit
             Some(var) => {
-                match self
-                    .unassigned_variables
-                    .intersect_first_set_ge(&clause.variables, var + 1)
-                {
+                match clause.variables.first_set_ge(var + 1) {
                     Some(_) => None,
                     None => {
                         // found a unit clause
@@ -224,6 +216,45 @@ impl<Config: ConfigT> State<Config> {
         &mut self.clauses_by_var[literal.variable()][literal.value()]
     }
 
+    // fn clauses_for_variable<'a>(
+    //     &'a mut self,
+    //     literal: Literal,
+    // ) -> impl Iterator<Item = &mut Clause<Config::BitSet>> + 'a {
+    //     let (clauses, clauses_for_var) = (
+    //         &mut self.clauses,
+    //         &self.clauses_by_var[literal.variable()][literal.value()],
+    //     );
+    //     clauses_for_var
+    //         .iter()
+    //         .map(|clause_idx| match &mut clauses[clause_idx] {
+    //             TombStone::TombStone(_, _) => panic!("Found tombstone in clauses for variable"),
+    //             TombStone::T(_, t) => t,
+    //         })
+    // }
+
+    pub fn clauses_for_variable<'a>(
+        &'a mut self,
+        literal: Literal,
+    ) -> impl Iterator<Item = &'a mut Clause<Config::BitSet>> + 'a {
+        let idxs = &self.clauses_by_var[literal.variable()][literal.value()];
+        let base: *mut TombStone<Clause<Config::BitSet>> = self.clauses.as_mut_ptr();
+
+        idxs.iter().map(move |i| {
+            // SAFETY:
+            // - [i] is within bounds of [self.clauses]
+            // - [idxs] contains no duplicate indices, so no two yielded &mut alias
+            // - [self] lives for 'a, and we tie the returned reference to 'a
+            unsafe {
+                match &mut *base.add(i) {
+                    TombStone::TombStone(_, _) => {
+                        panic!("Found tombstone in clauses for variable")
+                    }
+                    TombStone::T(_, t) => t,
+                }
+            }
+        })
+    }
+
     fn clauses(&self, literal: Literal) -> &Config::BitSet {
         &self.clauses_by_var[literal.variable()][literal.value()]
     }
@@ -235,9 +266,15 @@ impl<Config: ConfigT> State<Config> {
             trail_entry.literal.to_string(),
             trail_entry.decision_level
         );
-        for clause in &mut self.clauses_mut(trail_entry.literal) {
-            clause.variables.set(trail_entry.literal.variable());
-        }
+        self.clauses_for_variable(trail_entry.literal)
+            .for_each(|clause| {
+                clause.satisfied -= 1;
+                clause.variables.set(trail_entry.literal.variable());
+            });
+        self.clauses_for_variable(trail_entry.literal.negate())
+            .for_each(|clause| {
+                clause.variables.set(trail_entry.literal.variable());
+            });
         self.trail_entry_idx_by_var[trail_entry.literal.variable()] = None;
         match trail_entry.reason {
             Reason::Decision(_) => (),
@@ -258,7 +295,7 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn is_satisfied(&self, clause: &Clause<Config::BitSet>) -> bool {
-        clause.variables.first_set().is_none()
+        clause.is_satisfied()
     }
 
     fn remove_watched_clause_due_to_generation_mismatch(
@@ -287,14 +324,14 @@ impl<Config: ConfigT> State<Config> {
             .range(ClauseIdx(0)..)
             .next()
             .clone()
-            .map(|(x, y)| (x.clone(), y.clone()));
-        while let Some((ClauseIdx(clause_idx), generation)) = next {
+            .map(|(x, _)| x.clone());
+        while let Some((ClauseIdx(clause_idx))) = next {
             next = self
                 .watched_clauses(literal)
                 .range(ClauseIdx(clause_idx + 1)..)
                 .next()
                 .clone()
-                .map(|(x, y)| (x.clone(), y.clone()));
+                .map(|(x, _)| x.clone());
 
             if self.remove_watched_clause_due_to_generation_mismatch(literal, ClauseIdx(clause_idx))
             {
@@ -357,9 +394,15 @@ impl<Config: ConfigT> State<Config> {
             trail_entry.decision_level,
             trail_entry.literal.to_string()
         );
-        for clause in self.clauses_mut(trail_entry.literal).iter() {
-            clause.variables.clear(trail_entry.literal.variable());
-        }
+        self.clauses_for_variable(trail_entry.literal)
+            .for_each(|clause| {
+                clause.satisfied += 1;
+                clause.variables.clear(trail_entry.literal.variable());
+            });
+        self.clauses_for_variable(trail_entry.literal.negate())
+            .for_each(|clause| {
+                clause.variables.clear(trail_entry.literal.variable());
+            });
         let literal = trail_entry.literal;
         let var = literal.variable();
         if literal.value() {
@@ -538,7 +581,7 @@ impl<Config: ConfigT> State<Config> {
             match reason {
                 Reason::Decision(_) => assert!(false), // never reach this
                 Reason::ClauseIdx(clause_idx) => {
-                    self.add_clause_activity(clause_idx);
+                    rescale = rescale || self.add_clause_activity(clause_idx);
                     let trail_entry = &self.trail[trail_entry_idx];
                     for lit in self.clauses[clause_idx]
                         .value_exn()
@@ -566,6 +609,9 @@ impl<Config: ConfigT> State<Config> {
                     );
                 }
             }
+        }
+        if rescale {
+            self.rescale_clause_activities();
         }
         learned
     }
@@ -604,8 +650,8 @@ impl<Config: ConfigT> State<Config> {
             self.clauses_mut(lit).set(len);
         }
         self.remove_from_trail_helper(Some(remove_greater_than));
-        let clause_idx = self.push_clause(learned_clause);
         self.ready_for_unit_prop.clear_all();
+        let clause_idx = self.push_clause(learned_clause);
         self.update_watch_literals_for_new_clause(clause_idx);
     }
 
@@ -769,10 +815,7 @@ impl<Config: ConfigT> State<Config> {
         ready_for_unit_prop: &mut Config::BitSet,
     ) {
         let mut unassigned_lits = clause.iter_literals();
-        match (
-            unassigned_lits.next(),
-            unassigned_lits.next(),
-        ) {
+        match (unassigned_lits.next(), unassigned_lits.next()) {
             (Some(lit), None) => {
                 watched_clauses[lit.variable()][lit.value()]
                     .insert(ClauseIdx(clause_idx), generation);
@@ -795,7 +838,7 @@ impl<Config: ConfigT> State<Config> {
                 watched_clauses[a.variable()][a.value()].insert(ClauseIdx(clause_idx), generation);
                 watched_clauses[b.variable()][b.value()].insert(ClauseIdx(clause_idx), generation);
             }
-            _ => assert!(false),
+            (a, b) => panic!("Unexpected pat {a:?} {b:?}"),
         };
     }
 
@@ -837,8 +880,12 @@ impl<Config: ConfigT> State<Config> {
         }
 
         for _ in 0..num_vars {
-            let mut bs = bitset_pool.acquire(|| Config::BitSet::create());
-            bs.clear_all();
+            let mut bs = TfPair {
+                first: bitset_pool.acquire(|| Config::BitSet::create()),
+                second: bitset_pool.acquire(|| Config::BitSet::create()),
+            };
+            bs.first.clear_all();
+            bs.second.clear_all();
             clauses_by_var.push(bs);
             watched_clauses.push(TfPair {
                 first: BTreeMap::new(),
@@ -861,7 +908,7 @@ impl<Config: ConfigT> State<Config> {
                 instantly_unsat = true;
             }
             clause.iter_literals().for_each(|lit| {
-                clauses_by_var[lit.variable()].set(idx);
+                clauses_by_var[lit.variable()][lit.value()].set(idx);
             });
             Self::update_watch_literals_for_new_clause_helper(
                 &debug_writer,
@@ -901,8 +948,6 @@ impl<Config: ConfigT> State<Config> {
             watched_clauses,
             clauses_by_var,
             trail_entry_idx_by_var: vec![None; num_vars],
-            scratch_clause_bitset: Some(bitset_pool.acquire(|| Config::BitSet::create())),
-            scratch_variable_bitset: Some(bitset_pool.acquire(|| Config::BitSet::create())),
             decision_level: 0,
             bitset_pool,
             iterations: 0,
@@ -951,20 +996,40 @@ impl<Config: ConfigT> State<Config> {
 pub struct RandomConfig {}
 pub struct RandomConfigDebug {}
 
+// fn choose_random_literal<T: ConfigT>(state: &mut State<T>) -> Option<Literal> {
+//     let len = state.unassigned_variables.count();
+//     if len == 0 {
+//         None
+//     } else {
+//         let num = state.rng.random_range(0..len);
+//         match state.unassigned_variables.nth(num) {
+//             None => panic!("unassigned_variables should have been non-empty, but was empty"),
+//             Some(var) => {
+//                 let value = state.rng.random_ratio(1, 2);
+//                 Some(Literal::new(var, value))
+//             }
+//         }
+//     }
+// }
+
 fn choose_random_literal<T: ConfigT>(state: &mut State<T>) -> Option<Literal> {
-    let len = state.unassigned_variables.count();
-    if len == 0 {
-        None
-    } else {
-        let num = state.rng.random_range(0..len);
-        match state.unassigned_variables.nth(num) {
-            None => panic!("unassigned_variables should have been non-empty, but was empty"),
-            Some(var) => {
-                let value = state.rng.random_ratio(1, 2);
-                Some(Literal::new(var, value))
+    state
+        .clauses
+        .iter()
+        .filter_map(|x| x.value())
+        .filter_map(|clause| {
+            let len = clause.variables.count();
+            let () = if len == 0 { None } else { Some(()) }?;
+            let num = state.rng.random_range(0..len);
+            match clause.variables.nth(num) {
+                None => panic!("unassigned_variables should have been non-empty, but was empty"),
+                Some(var) => {
+                    let value = !clause.negatives.contains(var);
+                    Some(Literal::new(var, value))
+                }
             }
-        }
-    }
+        })
+        .next()
 }
 
 impl ConfigT for RandomConfig {

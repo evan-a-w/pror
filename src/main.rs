@@ -221,7 +221,7 @@ fn useless_set_thing() {
 
 
 pub fn main() {
-    // stepped1();
+    stepped1();
     // stepped3();
 
     // wikipedia();
@@ -233,7 +233,7 @@ pub fn main() {
     // factor_sat_eg();
     // factor_unsat_eg();
 
-    subsets_100_eg();
+    // subsets_100_eg();
 
     // fail_eg();
 }

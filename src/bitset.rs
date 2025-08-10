@@ -48,6 +48,10 @@ pub trait BitSetT {
 
     fn count(&self) -> usize;
 
+    fn is_empty(&self) -> bool {
+        self.first_set().is_none()
+    }
+
     fn iter(&self) -> impl Iterator<Item = usize> + '_ {
         let mut after = 0;
         iter::from_fn(move || {
@@ -73,10 +77,6 @@ pub trait BitSetT {
 
     fn intersect_first_set(&self, other: &impl BitSetT) -> Option<usize> {
         self.intersect_first_set_ge(other, 0)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.first_set().is_none()
     }
 
     fn iter_union<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = usize> + 'a {
@@ -313,4 +313,3 @@ impl BTreeBitSet {
             .into_iter()
     }
 }
-
