@@ -52,7 +52,7 @@ mod tests {
         let formula = vec![vec![1, 2], vec![-2, 3], vec![-1, -3]];
         let result = Default::solve(formula);
         let s = format!("{:?}", result);
-        let expect = expect!["Sat({1: true, 2: false, 3: false})"];
+        let expect = expect!["Sat({1: false, 2: true, 3: true})"];
         expect.assert_eq(&s);
     }
 
@@ -75,7 +75,7 @@ mod tests {
         ];
         let result = Default::solve(formula);
         let s = format!("{:?}", result);
-        let expect = expect!["Sat({1: true, 2: false, 3: true})"];
+        let expect = expect!["Sat({1: true, 2: true, 3: true})"];
         expect.assert_eq(&s);
     }
 
@@ -128,6 +128,7 @@ mod tests {
         step_and_print(&mut writer, &mut solver, None);
         step_and_print(&mut writer, &mut solver, None);
         step_and_print(&mut writer, &mut solver, Some(Literal::new(5, false)));
+        step_and_print(&mut writer, &mut solver, None);
         step_and_print(&mut writer, &mut solver, None);
         step_and_print(&mut writer, &mut solver, None);
         let expect = expect![[r#"
@@ -186,36 +187,43 @@ mod tests {
             replacing watched literal -1 with 6 in clause ("(-1 -5 6)")
 
             Continue
-            reacting to action: Continue(Literal { value: 3 }) at decision level 1
-            adding to trail at decision level 1: 3
-            updating watched clauses for literal 3
+            reacting to action: Continue(Literal { value: 2 }) at decision level 1
+            adding to trail at decision level 1: 2
+            updating watched clauses for literal 2
+            found unit literal (4) while updating watched clauses for literal -2 in clause ("(-2 4)")
 
             Continue
-            reacting to action: Continue(Literal { value: -5 }) at decision level 2
-            adding to trail at decision level 2: -5
-            updating watched clauses for literal -5
-            found unit literal (6) while updating watched clauses for literal 5 in clause ("(-1 5 6)")
-            found unit literal (-6) while updating watched clauses for literal 5 in clause ("(-1 5 -6)")
+            found unit clause: Literal { value: 4 } in clause ("(-2 4)") unit clauses rn: 
+            adding to trail at decision level 1: 4
+            updating watched clauses for literal 4
 
             Continue
-            found unit clause: Literal { value: 6 } in clause ("(-1 5 6)") unit clauses rn: (-1 5 -6)
+            reacting to action: Continue(Literal { value: 6 }) at decision level 2
             adding to trail at decision level 2: 6
             updating watched clauses for literal 6
-            reacting to action: Contradiction(5) at decision level 2
-            undoing trail entry: 6 at decision level 2
-            undoing trail entry: -5 at decision level 2
-            undoing trail entry: 3 at decision level 1
-            adding watched literal 5 for unit clause ("(-1 5)")
+            found unit literal (5) while updating watched clauses for literal -6 in clause ("(-1 5 -6)")
+            found unit literal (-5) while updating watched clauses for literal -6 in clause ("(-5 -6)")
 
             Continue
-            found unit clause: Literal { value: 5 } in clause ("(-1 5)") unit clauses rn: 
-            adding to trail at decision level 0: 5
+            found unit clause: Literal { value: 5 } in clause ("(-1 5 -6)") unit clauses rn: (-5 -6)
+            adding to trail at decision level 2: 5
             updating watched clauses for literal 5
-            found unit literal (-6) while updating watched clauses for literal -5 in clause ("(-5 -6)")
-            found unit literal (6) while updating watched clauses for literal -5 in clause ("(-1 -5 6)")
-            found unit clause: Literal { value: -6 } in clause ("(-5 -6)") unit clauses rn: (-1 -5 6)
+            reacting to action: Contradiction(6) at decision level 2
+            undoing trail entry: 5 at decision level 2
+            undoing trail entry: 6 at decision level 2
+            undoing trail entry: 4 at decision level 1
+            undoing trail entry: 2 at decision level 1
+            adding watched literal -6 for unit clause ("(-1 -6)")
+
+            Continue
+            found unit clause: Literal { value: -6 } in clause ("(-1 -6)") unit clauses rn: 
             adding to trail at decision level 0: -6
             updating watched clauses for literal -6
+            found unit literal (5) while updating watched clauses for literal 6 in clause ("(-1 5 6)")
+            found unit literal (-5) while updating watched clauses for literal 6 in clause ("(-1 -5 6)")
+            found unit clause: Literal { value: 5 } in clause ("(-1 5 6)") unit clauses rn: (-1 -5 6)
+            adding to trail at decision level 0: 5
+            updating watched clauses for literal 5
             reacting to action: Contradiction(7) at decision level 0
 
             Done(Unsat)
@@ -260,31 +268,32 @@ mod tests {
             adding watched literals -2 and -6 for clause ("(-2 -6)")
             adding watched literals -1 and -2 for clause ("(-1 -2 4 5)")
             adding watched literals 1 and 2 for clause ("(1 2 3 -4 -5 -6)")
-            reacting to action: Continue(Literal { value: -3 }) at decision level 1
-            adding to trail at decision level 1: -3
-            updating watched clauses for literal -3
-            replacing watched literal 3 with 6 in clause ("(3 -5 6)")
-            replacing watched literal 3 with 4 in clause ("(-2 3 4 -6)")
-            reacting to action: Continue(Literal { value: -6 }) at decision level 2
-            adding to trail at decision level 2: -6
-            updating watched clauses for literal -6
-            found unit literal (-5) while updating watched clauses for literal 6 in clause ("(3 -5 6)")
-            found unit clause: Literal { value: -5 } in clause ("(3 -5 6)") unit clauses rn: 
-            adding to trail at decision level 2: -5
+            reacting to action: Continue(Literal { value: -2 }) at decision level 1
+            adding to trail at decision level 1: -2
+            updating watched clauses for literal -2
+            replacing watched literal 2 with 3 in clause ("(1 2 3 -4 5 6)")
+            replacing watched literal 2 with 3 in clause ("(-1 2 3)")
+            replacing watched literal 2 with -3 in clause ("(-1 2 -3 -4 5 6)")
+            replacing watched literal 2 with 3 in clause ("(1 2 3 -4 -5 -6)")
+            reacting to action: Continue(Literal { value: 3 }) at decision level 2
+            adding to trail at decision level 2: 3
+            updating watched clauses for literal 3
+            replacing watched literal -3 with 5 in clause ("(-3 -4 5 -6)")
+            replacing watched literal -3 with -4 in clause ("(-1 2 -3 -4 5 6)")
+            reacting to action: Continue(Literal { value: -4 }) at decision level 3
+            adding to trail at decision level 3: -4
+            updating watched clauses for literal -4
+            replacing watched literal 4 with -5 in clause ("(1 4 -5 -6)")
+            reacting to action: Continue(Literal { value: -5 }) at decision level 4
+            adding to trail at decision level 4: -5
             updating watched clauses for literal -5
-            reacting to action: Continue(Literal { value: 1 }) at decision level 3
-            adding to trail at decision level 3: 1
-            updating watched clauses for literal 1
-            found unit literal (2) while updating watched clauses for literal -1 in clause ("(-1 2 3)")
-            replacing watched literal -1 with 4 in clause ("(-1 -2 4 5)")
-            found unit clause: Literal { value: 2 } in clause ("(-1 2 3)") unit clauses rn: 
-            adding to trail at decision level 3: 2
-            updating watched clauses for literal 2
-            found unit literal (4) while updating watched clauses for literal -2 in clause ("(-1 -2 4 5)")
-            found unit clause: Literal { value: 4 } in clause ("(-1 -2 4 5)") unit clauses rn: 
-            adding to trail at decision level 3: 4
-            updating watched clauses for literal 4
-            Sat({1: true, 2: true, 3: false, 4: true, 5: false, 6: false})
+            reacting to action: Continue(Literal { value: -6 }) at decision level 5
+            adding to trail at decision level 5: -6
+            updating watched clauses for literal -6
+            reacting to action: Continue(Literal { value: -1 }) at decision level 6
+            adding to trail at decision level 6: -1
+            updating watched clauses for literal -1
+            Sat({1: false, 2: false, 3: true, 4: false, 5: false, 6: false})
         "#]];
         expect.assert_eq(writer.borrow().as_ref());
     }
@@ -502,43 +511,37 @@ mod tests {
             found unit clause: Literal { value: 15 } in clause ("(13 15)") unit clauses rn: (-3)
             adding to trail at decision level 0: 15
             updating watched clauses for literal 15
-            reacting to action: Continue(Literal { value: -7 }) at decision level 1
-            adding to trail at decision level 1: -7
-            updating watched clauses for literal -7
-            replacing watched literal 7 with 8 in clause ("(-2 7 8 -12 14)")
-            reacting to action: Continue(Literal { value: -14 }) at decision level 2
-            adding to trail at decision level 2: -14
+            reacting to action: Continue(Literal { value: 8 }) at decision level 1
+            adding to trail at decision level 1: 8
+            updating watched clauses for literal 8
+            reacting to action: Continue(Literal { value: -5 }) at decision level 2
+            adding to trail at decision level 2: -5
+            updating watched clauses for literal -5
+            reacting to action: Continue(Literal { value: -14 }) at decision level 3
+            adding to trail at decision level 3: -14
             updating watched clauses for literal -14
             found unit literal (11) while updating watched clauses for literal 14 in clause ("(11 14)")
             found unit clause: Literal { value: 11 } in clause ("(11 14)") unit clauses rn: 
-            adding to trail at decision level 2: 11
+            adding to trail at decision level 3: 11
             updating watched clauses for literal 11
             replacing watched literal -11 with -12 in clause ("(2 3 -9 -11 -12)")
-            reacting to action: Continue(Literal { value: 2 }) at decision level 3
-            adding to trail at decision level 3: 2
-            updating watched clauses for literal 2
-            replacing watched literal -2 with -8 in clause ("(-2 -4 -5 7 -8)")
-            replacing watched literal -2 with -6 in clause ("(-2 -5 -6 7 8 -9 10 12 -15)")
-            replacing watched literal -2 with -12 in clause ("(-2 7 8 -12 14)")
-            replacing watched literal -2 with -5 in clause ("(1 -2 3 -4 -5 6 7 8 -11 -15)")
-            replacing watched literal -2 with -8 in clause ("(-2 -5 -8 -9 10 -11 14)")
-            reacting to action: Continue(Literal { value: 6 }) at decision level 4
-            adding to trail at decision level 4: 6
-            updating watched clauses for literal 6
-            replacing watched literal -6 with 8 in clause ("(-2 -5 -6 7 8 -9 10 12 -15)")
-            reacting to action: Continue(Literal { value: -5 }) at decision level 5
-            adding to trail at decision level 5: -5
-            updating watched clauses for literal -5
-            reacting to action: Continue(Literal { value: 8 }) at decision level 6
-            adding to trail at decision level 6: 8
-            updating watched clauses for literal 8
-            reacting to action: Continue(Literal { value: 12 }) at decision level 7
-            adding to trail at decision level 7: 12
+            reacting to action: Continue(Literal { value: 12 }) at decision level 4
+            adding to trail at decision level 4: 12
             updating watched clauses for literal 12
-            reacting to action: Continue(Literal { value: 1 }) at decision level 8
-            adding to trail at decision level 8: 1
+            found unit literal (2) while updating watched clauses for literal -12 in clause ("(2 3 -9 -11 -12)")
+            found unit clause: Literal { value: 2 } in clause ("(2 3 -9 -11 -12)") unit clauses rn: 
+            adding to trail at decision level 4: 2
+            updating watched clauses for literal 2
+            reacting to action: Continue(Literal { value: 6 }) at decision level 5
+            adding to trail at decision level 5: 6
+            updating watched clauses for literal 6
+            reacting to action: Continue(Literal { value: 1 }) at decision level 6
+            adding to trail at decision level 6: 1
             updating watched clauses for literal 1
-            Sat({1: true, 2: true, 3: false, 4: true, 5: false, 6: true, 7: false, 8: true, 9: true, 10: false, 11: true, 12: true, 13: false, 14: false, 15: true})
+            reacting to action: Continue(Literal { value: 7 }) at decision level 7
+            adding to trail at decision level 7: 7
+            updating watched clauses for literal 7
+            Sat({1: true, 2: true, 3: false, 4: true, 5: false, 6: true, 7: true, 8: true, 9: true, 10: false, 11: true, 12: true, 13: false, 14: false, 15: true})
         "#]];
         expect.assert_eq(writer.borrow().as_ref());
     }
