@@ -113,7 +113,7 @@ impl<BitSet: BitSetT> Clause<BitSet> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Hash, PartialOrd, Ord)]
 pub struct Literal {
     value: isize,
 }

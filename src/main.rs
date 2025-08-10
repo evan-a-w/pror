@@ -46,6 +46,7 @@ fn stepped1() {
     step_and_print(&mut solver, Some(Literal::new(5, false)));
     step_and_print(&mut solver, None);
     step_and_print(&mut solver, None);
+    step_and_print(&mut solver, None);
     // let res = DefaultDebug::solve(formula);
     // println! {"res: {:?}", res};
 }
@@ -224,16 +225,16 @@ pub fn main() {
     // stepped1();
     // stepped3();
 
-    // wikipedia();
-    // long();
-    // succ_eg();
-    // sudoku();
-    // simple();
+    wikipedia();
+    long();
+    succ_eg();
+    sudoku();
+    simple();
 
     // factor_sat_eg();
     // factor_unsat_eg();
 
-    subsets_100_eg();
+    // subsets_100_eg();
 
     // fail_eg();
 }

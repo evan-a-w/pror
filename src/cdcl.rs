@@ -4,11 +4,12 @@ use crate::pool::Pool;
 use crate::sat::*;
 use crate::tombstone::*;
 use itertools::Itertools;
+use ordered_float::OrderedFloat;
 use quickcheck::Gen;
 use rand::prelude::*;
 use rand_pcg::Pcg64;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub trait ConfigT: Sized {
     type BitSet: BitSetT + Clone;
@@ -88,6 +89,11 @@ pub struct State<Config: ConfigT> {
     cla_inc: f64,
     cla_decay_factor: f64,
     cla_activity_rescale: f64,
+    vsids_inc: f64,
+    vsids_decay_factor: f64,
+    vsids_activity_rescale: f64,
+    score_for_literal: Vec<TfPair<f64>>,
+    literal_by_score: BTreeSet<(OrderedFloat<f64>, Literal)>,
     immediate_result: Option<SatResult>,
     simplify_clauses_every: usize,
     all_variables: Config::BitSet,
@@ -100,10 +106,8 @@ pub struct State<Config: ConfigT> {
     trail: Vec<TrailEntry>,
     unassigned_variables: Config::BitSet,
     num_initial_clauses: usize,
-    clauses_by_var: Vec<Config::BitSet>,
+    clauses_by_var: Vec<TfPair<Config::BitSet>>,
     trail_entry_idx_by_var: Vec<Option<usize>>,
-    scratch_clause_bitset: Option<Config::BitSet>,
-    scratch_variable_bitset: Option<Config::BitSet>,
     decision_level: usize,
     bitset_pool: Pool<Config::BitSet>,
     iterations: usize,
@@ -158,15 +162,12 @@ impl<Config: ConfigT> State<Config> {
     fn delete_clause(&mut self, idx: usize) {
         let mut next_variable = 0;
         loop {
-            match self.clauses[idx]
-                .value_exn()
-                .variables
-                .first_set_ge(next_variable + 1)
-            {
+            let clause = self.clauses[idx].value_exn();
+            match clause.variables.first_set_ge(next_variable + 1) {
                 None => break,
                 Some(variable) => {
                     next_variable = variable;
-                    self.clauses_by_var[variable].clear(idx);
+                    self.clauses_by_var[variable][!clause.negatives.contains(variable)].clear(idx);
                 }
             }
         }
@@ -219,11 +220,11 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn clauses_mut(&mut self, literal: Literal) -> &mut Config::BitSet {
-        &mut self.clauses_by_var[literal.variable()]
+        &mut self.clauses_by_var[literal.variable()][literal.value()]
     }
 
     fn clauses(&self, literal: Literal) -> &Config::BitSet {
-        &self.clauses_by_var[literal.variable()]
+        &self.clauses_by_var[literal.variable()][literal.value()]
     }
 
     fn undo_entry(&mut self, trail_entry: &mut TrailEntry) {
@@ -233,6 +234,15 @@ impl<Config: ConfigT> State<Config> {
             trail_entry.literal.to_string(),
             trail_entry.decision_level
         );
+        let literal = trail_entry.literal;
+        self.literal_by_score.insert((
+            OrderedFloat(self.score_for_literal[literal.variable()][literal.value()]),
+            literal.clone(),
+        ));
+        self.literal_by_score.insert((
+            OrderedFloat(self.score_for_literal[literal.variable()][!literal.value()]),
+            literal.negate(),
+        ));
         self.trail_entry_idx_by_var[trail_entry.literal.variable()] = None;
         self.unassigned_variables
             .set(trail_entry.literal.variable());
@@ -377,35 +387,25 @@ impl<Config: ConfigT> State<Config> {
                 self.clauses[clause_idx].value_mut().unwrap().num_units += 1;
             }
         };
+        self.literal_by_score.remove(&(
+            OrderedFloat(self.score_for_literal[var][literal.value()]),
+            literal.clone(),
+        ));
+        self.literal_by_score.remove(&(
+            OrderedFloat(self.score_for_literal[var][!literal.value()]),
+            literal.negate(),
+        ));
         self.trail_entry_idx_by_var[var] = Some(self.trail.len());
         self.unassigned_variables.clear(var);
         self.trail.push(trail_entry);
         self.update_watched_clauses(literal)
     }
 
-    fn unit_propagate_internal(&mut self) -> UnitPropagationResult {
-        if let Some(clause_idx) = self.ready_for_unit_prop.pop_first_set() {
-            match self.clauses[clause_idx]
-                .value()
-                .and_then(|x| self.try_get_unit_literal(x))
-            {
-                None => self.unit_propagate_internal(),
-                Some(literal) => self.with_unit_clause(literal, ClauseIdx(clause_idx)),
-            }
-        } else {
-            UnitPropagationResult::FinishedUnitPropagation
-        }
-    }
-
     fn clause_string(&self, clause_idx: ClauseIdx) -> String {
         self.clauses[clause_idx.0].value_exn().to_string()
     }
 
-    fn with_unit_clause(
-        &mut self,
-        literal: Literal,
-        clause_idx: ClauseIdx,
-    ) -> UnitPropagationResult {
+    fn with_unit_clause(&mut self, literal: Literal, clause_idx: ClauseIdx) -> Option<ClauseIdx> {
         debug!(
             self.debug_writer,
             "found unit clause: {:?} in clause ({:?}) unit clauses rn: {}",
@@ -423,24 +423,30 @@ impl<Config: ConfigT> State<Config> {
             decision_level,
             reason: Reason::ClauseIdx(clause_idx.0),
         };
-        if let Some(conflict) = self.add_to_trail(trail_entry) {
-            UnitPropagationResult::Contradiction(conflict)
-        } else {
-            self.unit_propagate_internal()
-        }
+        self.add_to_trail(trail_entry)
     }
 
     fn unit_propagate(&mut self) -> UnitPropagationResult {
-        if let Some(clause_idx) = self.ready_for_unit_prop.pop_first_set() {
+        let mut num_props = 0;
+        while let Some(clause_idx) = self.ready_for_unit_prop.pop_first_set() {
             match self.clauses[clause_idx]
                 .value()
                 .and_then(|x| self.try_get_unit_literal(x))
             {
-                None => self.unit_propagate(),
-                Some(literal) => self.with_unit_clause(literal, ClauseIdx(clause_idx)),
+                None => continue,
+                Some(literal) => {
+                    if let Some(clause_idx) = self.with_unit_clause(literal, ClauseIdx(clause_idx))
+                    {
+                        return UnitPropagationResult::Contradiction(clause_idx);
+                    };
+                    num_props += 1;
+                }
             }
-        } else {
+        }
+        if num_props == 0 {
             UnitPropagationResult::NothingToPropagate
+        } else {
+            UnitPropagationResult::FinishedUnitPropagation
         }
     }
 
@@ -482,6 +488,7 @@ impl<Config: ConfigT> State<Config> {
         for clause in self.clauses.iter_mut().filter_map(|x| x.value_mut()) {
             clause.score /= self.cla_activity_rescale;
         }
+        self.cla_inc /= self.cla_activity_rescale;
     }
 
     fn add_clause_activity(&mut self, clause_idx: usize) -> bool {
@@ -498,6 +505,47 @@ impl<Config: ConfigT> State<Config> {
 
     fn decay_clause_activities(&mut self) {
         self.cla_inc /= self.cla_decay_factor;
+    }
+
+    fn rescale_vsids(&mut self) {
+        let (all_variables, score_for_literal, literal_by_score, rescale) = (
+            &self.all_variables,
+            &mut self.score_for_literal,
+            &mut self.literal_by_score,
+            &self.vsids_activity_rescale,
+        );
+
+        for literal in all_variables.iter().flat_map(|variable| {
+            [Literal::new(variable, false), Literal::new(variable, true)].into_iter()
+        }) {
+            let score = &mut score_for_literal[literal.variable()][literal.value()];
+            let rem = literal_by_score.remove(&(OrderedFloat(*score), literal));
+            *score /= rescale;
+            if rem {
+                literal_by_score.insert((OrderedFloat(*score), literal.clone()));
+            }
+        }
+
+        self.vsids_inc /= self.vsids_activity_rescale;
+    }
+
+    fn add_vsids_activity(&mut self, literal: Literal) {
+        let score = &mut self.score_for_literal[literal.variable()][literal.value()];
+        let rem = self
+            .literal_by_score
+            .remove(&(OrderedFloat(*score), literal));
+        *score += self.vsids_inc;
+        if rem {
+            self.literal_by_score
+                .insert((OrderedFloat(*score), literal.clone()));
+        }
+        if *score > self.vsids_activity_rescale {
+            self.rescale_vsids()
+        }
+    }
+
+    fn decay_vsids_activities(&mut self) {
+        self.vsids_inc /= self.vsids_decay_factor;
     }
 
     fn learn_clause_from_failure(
@@ -534,10 +582,11 @@ impl<Config: ConfigT> State<Config> {
             {
                 continue;
             }
+            self.add_vsids_activity(self.trail[trail_entry_idx].literal);
             match reason {
                 Reason::Decision(_) => assert!(false), // never reach this
                 Reason::ClauseIdx(clause_idx) => {
-                    self.add_clause_activity(clause_idx);
+                    rescale = rescale || self.add_clause_activity(clause_idx);
                     let trail_entry = &self.trail[trail_entry_idx];
                     for lit in self.clauses[clause_idx]
                         .value_exn()
@@ -565,6 +614,9 @@ impl<Config: ConfigT> State<Config> {
                     );
                 }
             }
+        }
+        if rescale {
+            self.rescale_clause_activities()
         }
         learned
     }
@@ -733,6 +785,7 @@ impl<Config: ConfigT> State<Config> {
             );
             self.simplify_clauses();
             self.decay_clause_activities();
+            self.decay_vsids_activities();
         };
         if let Some(res) = self.immediate_result.take() {
             return StepResult::Done(res);
@@ -871,8 +924,12 @@ impl<Config: ConfigT> State<Config> {
         }
 
         for _ in 0..num_vars {
-            let mut bs = bitset_pool.acquire(|| Config::BitSet::create());
-            bs.clear_all();
+            let mut bs = TfPair {
+                first: bitset_pool.acquire(|| Config::BitSet::create()),
+                second: bitset_pool.acquire(|| Config::BitSet::create()),
+            };
+            bs.first.clear_all();
+            bs.second.clear_all();
             clauses_by_var.push(bs);
             watched_clauses.push(TfPair {
                 first: BTreeMap::new(),
@@ -891,11 +948,12 @@ impl<Config: ConfigT> State<Config> {
         };
 
         for (idx, clause) in clauses.iter().filter_map(|x| x.value()).enumerate() {
+            // all things aren't tombstones rn so enumerate after filter map is ifne
             if clause.variables.is_empty() {
                 instantly_unsat = true;
             }
             clause.iter_literals().for_each(|lit| {
-                clauses_by_var[lit.variable()].set(idx);
+                clauses_by_var[lit.variable()][lit.value()].set(idx);
             });
             Self::update_watch_literals_for_new_clause_helper(
                 &debug_writer,
@@ -919,10 +977,36 @@ impl<Config: ConfigT> State<Config> {
         let all_variables = variables_bitset.clone();
         let unassigned_variables = variables_bitset;
         let rng = Pcg64::seed_from_u64(5);
+
+        let score_for_literal = (0..num_vars)
+            .map(|variable| {
+                let first = clauses_by_var[variable][true].count() as f64;
+                let second = clauses_by_var[variable][false].count() as f64;
+                TfPair { first, second }
+            })
+            .collect::<Vec<_>>();
+
+        let literal_by_score = all_variables
+            .iter()
+            .flat_map(|i| {
+                let score = &score_for_literal[i];
+                [
+                    (OrderedFloat(score[true]), Literal::new(i, true)),
+                    (OrderedFloat(score[false]), Literal::new(i, false)),
+                ]
+                .into_iter()
+            })
+            .collect::<BTreeSet<_>>();
+
         State {
+            score_for_literal,
+            literal_by_score,
             cla_decay_factor: 0.75,
             cla_activity_rescale: 1e20,
             cla_inc: 1.0,
+            vsids_decay_factor: 0.75,
+            vsids_activity_rescale: 1e20,
+            vsids_inc: 1.0,
             clauses_first_tombstone: None,
             clause_sorting_buckets: vec![],
             simplify_clauses_every: 2500,
@@ -937,8 +1021,6 @@ impl<Config: ConfigT> State<Config> {
             watched_clauses,
             clauses_by_var,
             trail_entry_idx_by_var: vec![None; num_vars],
-            scratch_clause_bitset: Some(bitset_pool.acquire(|| Config::BitSet::create())),
-            scratch_variable_bitset: Some(bitset_pool.acquire(|| Config::BitSet::create())),
             decision_level: 0,
             bitset_pool,
             iterations: 0,
@@ -987,6 +1069,9 @@ impl<Config: ConfigT> State<Config> {
 pub struct RandomConfig {}
 pub struct RandomConfigDebug {}
 
+pub struct VsidsConfig {}
+pub struct VsidsConfigDebug {}
+
 fn choose_random_literal<T: ConfigT>(state: &mut State<T>) -> Option<Literal> {
     let len = state.unassigned_variables.count();
     if len == 0 {
@@ -1001,6 +1086,13 @@ fn choose_random_literal<T: ConfigT>(state: &mut State<T>) -> Option<Literal> {
             }
         }
     }
+}
+
+fn choose_vsids_literal<T: ConfigT>(state: &mut State<T>) -> Option<Literal> {
+    state
+        .literal_by_score
+        .last()
+        .map(|(_, literal)| literal.clone())
 }
 
 impl ConfigT for RandomConfig {
@@ -1027,5 +1119,30 @@ impl ConfigT for RandomConfigDebug {
     const DEBUG: bool = true;
 }
 
-pub type Default = State<RandomConfig>;
-pub type DefaultDebug = State<RandomConfigDebug>;
+impl ConfigT for VsidsConfig {
+    // type BitSet = fixed_bitset::DefaultMapBitSet;
+    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
+    // type BitSet = BTreeBitSet;
+
+    fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
+        choose_vsids_literal(state)
+    }
+
+    const DEBUG: bool = false;
+}
+
+impl ConfigT for VsidsConfigDebug {
+    // type BitSet = fixed_bitset::DefaultMapBitSet;
+    type BitSet = fixed_bitset::BitSet<Vec<[usize; 1]>, 1>;
+    // type BitSet = BTreeBitSet;
+
+    fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
+        choose_vsids_literal(state)
+    }
+
+    const DEBUG: bool = true;
+}
+
+// pub type Default = State<RandomConfig>;
+pub type Default = State<VsidsConfig>;
+pub type DefaultDebug = State<VsidsConfigDebug>;
