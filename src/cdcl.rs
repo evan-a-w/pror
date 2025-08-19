@@ -554,6 +554,7 @@ impl<Config: ConfigT> State<Config> {
         let mut learned = self.clauses[failed_clause_idx.0]
             .value_exn()
             .copy(&mut self.bitset_pool);
+        learned.from_conflict = true;
         let mut num_at_level = 0;
 
         for lit in learned.iter_literals() {
@@ -759,7 +760,7 @@ impl<Config: ConfigT> State<Config> {
             .enumerate()
             .skip(self.num_initial_clauses)
             .filter_map(|(i, x)| x.value().map(|x| (i, x)))
-            .filter(|(_, x)| x.num_units == 0 && self.can_trim_clause(x))
+            .filter(|(_, x)| x.from_conflict && x.num_units == 0 && self.can_trim_clause(x))
         {
             sorting_buckets.push(ClauseIdx(idx));
         }
@@ -819,7 +820,7 @@ impl<Config: ConfigT> State<Config> {
         }
     }
 
-    pub fn run(&mut self) -> SatResult {
+    fn run_inner(&mut self) -> SatResult {
         loop {
             match self.step(None) {
                 StepResult::Done(SatResult::Unsat) => return SatResult::Unsat,
@@ -830,6 +831,24 @@ impl<Config: ConfigT> State<Config> {
                 StepResult::Continue => continue,
             }
         }
+    }
+
+    pub fn run(&mut self) -> SatResult {
+        self.restart();
+        self.run_inner()
+    }
+
+    pub fn run_with_assumptions(&mut self, assumptions: &[Literal]) -> SatResult {
+        self.restart();
+        for &lit in assumptions {
+            let trail_entry = TrailEntry {
+                literal: lit,
+                decision_level: 0,
+                reason: Reason::Decision(lit),
+            };
+            self.add_to_trail(trail_entry);
+        }
+        self.run_inner()
     }
 
     fn update_watch_literals_for_new_clause_helper(
@@ -1075,12 +1094,25 @@ impl<Config: ConfigT> State<Config> {
         Self::new_with_pool_and_debug_writer(formula, bitset_pool, debug_writer)
     }
 
+    pub fn solve_with_debug_writer_and_assumptions<Writer: std::fmt::Write + 'static>(
+        formula: Vec<Vec<isize>>,
+        assumptions: &[Literal],
+        debug_writer: Option<Writer>,
+    ) -> SatResult {
+        let mut state = Self::new_from_vec_with_debug_writer(formula, debug_writer);
+        state.run_with_assumptions(assumptions)
+    }
+
+    pub fn solve_with_assumptions(formula: Vec<Vec<isize>>, assumptions: &[Literal]) -> SatResult {
+        Self::solve_with_debug_writer_and_assumptions::<String>(formula, assumptions, None)
+    }
+
     pub fn solve_with_debug_writer<Writer: std::fmt::Write + 'static>(
         formula: Vec<Vec<isize>>,
         debug_writer: Option<Writer>,
     ) -> SatResult {
         let mut state = Self::new_from_vec_with_debug_writer(formula, debug_writer);
-        state.run()
+        state.run_inner()
     }
 
     pub fn solve(formula: Vec<Vec<isize>>) -> SatResult {

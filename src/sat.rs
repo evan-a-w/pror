@@ -23,6 +23,7 @@ pub struct Clause<BitSet: BitSetT> {
     pub tautology: bool,
     pub num_units: usize,
     pub score: f64,
+    pub from_conflict: bool,
 }
 
 pub fn satisfies<BitSet: BitSetT>(
@@ -48,6 +49,7 @@ impl<BitSet: BitSetT> Clause<BitSet> {
             tautology: false,
             num_units: 0,
             score: 0.0,
+            from_conflict: false,
         }
     }
     pub fn create(variables: BitSet, negatives: BitSet) -> Self {
@@ -57,6 +59,7 @@ impl<BitSet: BitSetT> Clause<BitSet> {
             tautology: false,
             num_units: 0,
             score: 0.0,
+            from_conflict: false,
         }
     }
 
@@ -86,6 +89,7 @@ impl<BitSet: BitSetT> Clause<BitSet> {
             tautology: self.tautology,
             num_units: 0,
             score: 0.0,
+            from_conflict: self.from_conflict,
         }
     }
 
@@ -192,6 +196,7 @@ impl<BitSet: BitSetT> Formula<BitSet> {
                 tautology,
                 num_units: 0,
                 score: 0.0,
+                from_conflict: false,
             });
         }
 
