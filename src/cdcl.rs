@@ -159,6 +159,55 @@ impl<Config: ConfigT> State<Config> {
         }
     }
 
+    pub fn add_clause(&mut self, clause_vec: Vec<isize>) {
+        let mut variables = self.bitset_pool.acquire(|| Config::BitSet::create());
+        let mut negatives = self.bitset_pool.acquire(|| Config::BitSet::create());
+        variables.clear_all();
+        negatives.clear_all();
+        let mut tautology = false;
+        for lit in &clause_vec {
+            if *lit == 0 {
+                panic!("Can't have 0 vars");
+            }
+            let var = lit.abs() as usize;
+            if variables.contains(var) && !negatives.contains(var) != (*lit < 0) {
+                tautology = true;
+            }
+            variables.set(var);
+            if *lit < 0 {
+                negatives.set(var);
+            }
+            if !self.all_variables.contains(var) {
+                self.all_variables.set(var);
+            }
+        }
+        let clause = Clause {
+            variables,
+            negatives,
+            tautology,
+            num_units: 0,
+            score: 0.0,
+            from_conflict: false,
+        };
+        let idx = self.push_clause(clause);
+
+        for lit in clause_vec {
+            let var = lit.abs() as usize;
+            let value = lit > 0;
+            self.clauses_by_var[var][value].set(idx);
+        }
+
+        Self::update_watch_literals_for_new_clause_helper(
+            &self.debug_writer,
+            &self.clauses[idx].value_exn(),
+            idx,
+            self.clauses[idx].generation().clone(),
+            &mut self.watched_clauses,
+            &mut self.ready_for_unit_prop,
+            &self.unassigned_variables,
+        );
+    }
+
     fn delete_clause(&mut self, idx: usize) {
         let mut next_variable = 0;
         loop {
