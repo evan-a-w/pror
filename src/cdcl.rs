@@ -838,9 +838,12 @@ impl<Config: ConfigT> State<Config> {
         self.run_inner()
     }
 
-    pub fn run_with_assumptions(&mut self, assumptions: &[Literal]) -> SatResult {
+    pub fn run_with_assumptions(&mut self, assumptions: &[isize]) -> SatResult {
         self.restart();
-        for &lit in assumptions {
+        for &lit_val in assumptions {
+            let var = lit_val.abs() as usize;
+            let value = lit_val > 0;
+            let lit = Literal::new(var, value);
             let trail_entry = TrailEntry {
                 literal: lit,
                 decision_level: 0,
@@ -1081,6 +1084,10 @@ impl<Config: ConfigT> State<Config> {
         Self::new_with_debug_writer::<String>(formula, None)
     }
 
+    pub fn create(formula: Vec<Vec<isize>>) -> Self {
+        Self::new_from_vec(formula)
+    }
+
     pub fn new_from_vec(formula: Vec<Vec<isize>>) -> Self {
         Self::new_from_vec_with_debug_writer::<String>(formula, None)
     }
@@ -1096,14 +1103,14 @@ impl<Config: ConfigT> State<Config> {
 
     pub fn solve_with_debug_writer_and_assumptions<Writer: std::fmt::Write + 'static>(
         formula: Vec<Vec<isize>>,
-        assumptions: &[Literal],
+        assumptions: &[isize],
         debug_writer: Option<Writer>,
     ) -> SatResult {
         let mut state = Self::new_from_vec_with_debug_writer(formula, debug_writer);
         state.run_with_assumptions(assumptions)
     }
 
-    pub fn solve_with_assumptions(formula: Vec<Vec<isize>>, assumptions: &[Literal]) -> SatResult {
+    pub fn solve_with_assumptions(formula: Vec<Vec<isize>>, assumptions: &[isize]) -> SatResult {
         Self::solve_with_debug_writer_and_assumptions::<String>(formula, assumptions, None)
     }
 
