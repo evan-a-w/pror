@@ -18,6 +18,7 @@ pub trait ConfigT: Sized {
     fn choose_literal(state: &mut State<Self>) -> Option<Literal>;
 
     const DEBUG: bool;
+    const CHECK_RESULTS: bool; // check the assignments actually match
 }
 
 #[macro_export]
@@ -93,7 +94,6 @@ pub struct State<Config: ConfigT> {
     vsids_activity_rescale: f64,
     score_for_literal: Vec<TfPair<f64>>,
     literal_by_score: BTreeSet<(OrderedFloat<f64>, Literal)>,
-    immediate_result: Option<SatResult>,
     simplify_clauses_every: usize,
     all_variables: Config::BitSet,
     assignments: Config::BitSet,
@@ -112,6 +112,7 @@ pub struct State<Config: ConfigT> {
     iterations: usize,
     rng: Pcg64,
     debug_writer: Option<RefCell<Box<dyn std::fmt::Write>>>,
+    instantly_unsat: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -693,10 +694,7 @@ impl<Config: ConfigT> State<Config> {
             "reacting to action: {:?} at decision level {}", action, self.decision_level
         );
         match action {
-            Action::Unsat => {
-                self.immediate_result = Some(SatResult::Unsat);
-                StepResult::Done(SatResult::Unsat)
-            }
+            Action::Unsat => StepResult::Done(SatResult::Unsat),
             Action::FinishedUnitPropagation => StepResult::Continue,
             Action::Continue(literal) => {
                 let trail_entry = TrailEntry {
@@ -723,7 +721,7 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn make_decision(&mut self, literal_override: Option<Literal>) -> StepResult {
-        match Config::choose_literal(self) {
+        match literal_override.or_else(|| Config::choose_literal(self)) {
             None => {
                 let assignments = self.assignments();
                 let res = SatResult::Sat(assignments);
@@ -731,7 +729,6 @@ impl<Config: ConfigT> State<Config> {
             }
             Some(literal) => {
                 self.decision_level += 1;
-                let literal = literal_override.unwrap_or_else(|| literal);
                 self.react(Action::Continue(literal))
             }
         }
@@ -808,8 +805,8 @@ impl<Config: ConfigT> State<Config> {
             self.simplify_clauses();
             self.decay_clause_activities();
         };
-        if let Some(res) = self.immediate_result.take() {
-            return StepResult::Done(res);
+        if self.instantly_unsat {
+            return StepResult::Done(SatResult::Unsat);
         }
         match self.unit_propagate() {
             UnitPropagationResult::NothingToPropagate => self.make_decision(literal_override),
@@ -825,7 +822,9 @@ impl<Config: ConfigT> State<Config> {
             match self.step(None) {
                 StepResult::Done(SatResult::Unsat) => return SatResult::Unsat,
                 StepResult::Done(SatResult::Sat(res)) => {
-                    assert!(satisfies(&self.clauses, &res));
+                    if Config::CHECK_RESULTS {
+                        assert!(satisfies(&self.clauses, &res));
+                    }
                     return SatResult::Sat(res);
                 }
                 StepResult::Continue => continue,
@@ -838,18 +837,40 @@ impl<Config: ConfigT> State<Config> {
         self.run_inner()
     }
 
+    fn stabilize_assumption(&mut self) -> Option<SatResult> {
+        match self.unit_propagate() {
+            UnitPropagationResult::Contradiction(ClauseIdx(idx)) => Some(SatResult::Unsat),
+            UnitPropagationResult::NothingToPropagate
+            | UnitPropagationResult::FinishedUnitPropagation => None,
+        }
+    }
+
     pub fn run_with_assumptions(&mut self, assumptions: &[isize]) -> SatResult {
         self.restart();
+
+        match self.stabilize_assumption() {
+            Some(res) => return res,
+            None => (),
+        }
         for &lit_val in assumptions {
             let var = lit_val.abs() as usize;
             let value = lit_val > 0;
             let lit = Literal::new(var, value);
-            let trail_entry = TrailEntry {
-                literal: lit,
-                decision_level: 0,
-                reason: Reason::Decision(lit),
-            };
-            self.add_to_trail(trail_entry);
+            if !self.unassigned_variables.contains(var) {
+                if self.assignments.contains(var) != value {
+                    return SatResult::Unsat;
+                } else {
+                    continue;
+                }
+            }
+            match self.make_decision(Some(lit)) {
+                StepResult::Continue => (),
+                StepResult::Done(res) => return res,
+            }
+            match self.stabilize_assumption() {
+                Some(res) => return res,
+                None => (),
+            }
         }
         self.run_inner()
     }
@@ -1007,13 +1028,6 @@ impl<Config: ConfigT> State<Config> {
                 &variables_bitset,
             );
         }
-        let immediate_result = if instantly_unsat {
-            Some(SatResult::Unsat)
-        } else if clauses.is_empty() {
-            Some(SatResult::Sat(BTreeMap::new()))
-        } else {
-            None
-        };
 
         let num_initial_clauses = clauses.len();
         let all_variables = variables_bitset.clone();
@@ -1055,7 +1069,6 @@ impl<Config: ConfigT> State<Config> {
             clause_sorting_buckets: vec![],
             simplify_clauses_every: 2500,
             ready_for_unit_prop,
-            immediate_result,
             all_variables,
             assignments: Config::BitSet::create(),
             clauses,
@@ -1070,6 +1083,7 @@ impl<Config: ConfigT> State<Config> {
             iterations: 0,
             rng,
             debug_writer,
+            instantly_unsat,
         }
     }
 
@@ -1164,6 +1178,7 @@ impl ConfigT for RandomConfig {
     }
 
     const DEBUG: bool = false;
+    const CHECK_RESULTS: bool = false;
 }
 
 impl ConfigT for RandomConfigDebug {
@@ -1174,6 +1189,7 @@ impl ConfigT for RandomConfigDebug {
     }
 
     const DEBUG: bool = true;
+    const CHECK_RESULTS: bool = true;
 }
 
 impl ConfigT for VsidsConfig {
@@ -1184,6 +1200,7 @@ impl ConfigT for VsidsConfig {
     }
 
     const DEBUG: bool = false;
+    const CHECK_RESULTS: bool = false;
 }
 
 impl ConfigT for VsidsConfigDebug {
@@ -1194,6 +1211,7 @@ impl ConfigT for VsidsConfigDebug {
     }
 
     const DEBUG: bool = true;
+    const CHECK_RESULTS: bool = true;
 }
 
 // pub type Default = State<RandomConfig>;

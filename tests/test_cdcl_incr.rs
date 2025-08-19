@@ -13,7 +13,7 @@ mod tests {
     use pror::sat::SatResult;
 
     #[test]
-    fn stepped2() {
+    fn stepped2_incr() {
         use std::fmt::Write;
         let formula = vec![
             vec![3, -5, 6],
@@ -41,13 +41,23 @@ mod tests {
         writeln!(writer, "{:?}", res);
         let res = solver.run_with_assumptions(&[1, 2, 5]);
         writeln!(writer, "{:?}", res);
+        let res = solver.run_with_assumptions(&[6]);
+        writeln!(writer, "{:?}", res);
         let res = solver.run_with_assumptions(&[1, 2, 6]);
+        writeln!(writer, "{:?}", res);
+        let res = solver.run_with_assumptions(&[-1, -2, -3, -4, -5]);
+        writeln!(writer, "{:?}", res);
+        let res = solver.run_with_assumptions(&[-1, -2, -3, -4, -5, -6]);
         writeln!(writer, "{:?}", res);
         let expect = expect![[r#"
             Sat({1: false, 2: false, 3: true, 4: false, 5: false, 6: false})
             Sat({1: true, 2: false, 3: true, 4: false, 5: false, 6: false})
             Sat({1: true, 2: true, 3: true, 4: true, 5: false, 6: false})
             Unsat
+            Sat({1: false, 2: false, 3: false, 4: true, 5: false, 6: true})
+            Unsat
+            Sat({1: false, 2: false, 3: false, 4: false, 5: false, 6: true})
+            Sat({1: false, 2: false, 3: false, 4: false, 5: false, 6: false})
         "#]];
         expect.assert_eq(writer.borrow().as_ref());
     }
