@@ -225,22 +225,48 @@ fn useless_set_thing() {
     });
 }
 
+pub fn stepped4_incr() {
+    let formula = vec![
+        vec![3, -5, 6],
+        vec![-2, -5, -3, 6, -4],
+        vec![-5, 1, 4, -6],
+        vec![3, -4, 6, 1, 2, 5],
+        vec![-3, 4, -2, 6, -1, -5],
+        vec![3, -2, -6, 4],
+        vec![3, 2, -1],
+        vec![-6, -4, 5, -3],
+        vec![-3, 2, 5, 6, -1, -4],
+        vec![4, -2, -3, 5],
+        vec![3, -2, -1, -5, -6, -4],
+        vec![-2, -6],
+        vec![-1, -2, 4, 5],
+        vec![2, -4, 1, 3, -5, -6],
+    ];
+    let mut solver = Default::new_from_vec(vec![]);
+    for clause in &formula {
+        solver.add_clause(clause.clone());
+        println!("{:?}", solver.run());
+    }
+    println!("{:?}", solver.run());
+}
+
 pub fn main() {
     // stepped1();
     // stepped3();
 
-    wikipedia();
-    long();
-    succ_eg();
-    sudoku();
-    simple();
+    // wikipedia();
+    // long();
+    // succ_eg();
+    // sudoku();
+    // simple();
 
-    factor_sat_eg();
-    factor_unsat_eg();
+    // factor_sat_eg();
+    // factor_unsat_eg();
 
-    subsets_100_eg();
+    // subsets_100_eg();
 
-    fail_eg();
+    // fail_eg();
 
     // useless_set_thing();
+    stepped4_incr();
 }

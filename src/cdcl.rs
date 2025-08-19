@@ -92,7 +92,6 @@ pub struct State<Config: ConfigT> {
     vsids_inc: f64,
     vsids_decay_factor: f64,
     vsids_activity_rescale: f64,
-    score_for_literal: Vec<TfPair<f64>>,
     literal_by_score: BTreeSet<(OrderedFloat<f64>, Literal)>,
     simplify_clauses_every: usize,
     all_variables: Config::BitSet,
@@ -100,11 +99,12 @@ pub struct State<Config: ConfigT> {
     clauses_first_tombstone: Option<usize>,
     clauses: Vec<TombStone<Clause<Config::BitSet>>>,
     clause_sorting_buckets: Vec<ClauseIdx>,
-    watched_clauses: Vec<TfPair<BTreeMap<ClauseIdx, Generation>>>,
     ready_for_unit_prop: Config::BitSet,
     trail: Vec<TrailEntry>,
     unassigned_variables: Config::BitSet,
     num_initial_clauses: usize,
+    watched_clauses: Vec<TfPair<BTreeMap<ClauseIdx, Generation>>>,
+    score_for_literal: Vec<TfPair<f64>>,
     clauses_by_var: Vec<TfPair<Config::BitSet>>,
     trail_entry_idx_by_var: Vec<Option<usize>>,
     decision_level: usize,
@@ -159,6 +159,31 @@ impl<Config: ConfigT> State<Config> {
         }
     }
 
+    fn maybe_add_var(&mut self, var: usize) {
+        if self.all_variables.contains(var) {
+            return;
+        }
+
+        self.all_variables.set(var);
+        let to_add = var - self.clauses_by_var.len() + 1;
+        for _ in 0..to_add {
+            let mut first = self.bitset_pool.acquire(|| Config::BitSet::create());
+            let mut second = self.bitset_pool.acquire(|| Config::BitSet::create());
+            first.clear_all();
+            second.clear_all();
+            self.clauses_by_var.push(TfPair { first, second });
+            self.trail_entry_idx_by_var.push(None);
+            self.score_for_literal.push(TfPair {
+                first: 0.0,
+                second: 0.0,
+            });
+            self.watched_clauses.push(TfPair {
+                first: BTreeMap::new(),
+                second: BTreeMap::new(),
+            });
+        }
+    }
+
     pub fn add_clause(&mut self, clause_vec: Vec<isize>) {
         let mut variables = self.bitset_pool.acquire(|| Config::BitSet::create());
         let mut negatives = self.bitset_pool.acquire(|| Config::BitSet::create());
@@ -177,9 +202,7 @@ impl<Config: ConfigT> State<Config> {
             if *lit < 0 {
                 negatives.set(var);
             }
-            if !self.all_variables.contains(var) {
-                self.all_variables.set(var);
-            }
+            self.maybe_add_var(var);
         }
         let clause = Clause {
             variables,
