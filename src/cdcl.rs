@@ -165,7 +165,7 @@ impl<Config: ConfigT> State<Config> {
         }
 
         self.all_variables.set(var);
-        let to_add = var - self.clauses_by_var.len() + 1;
+        let to_add = var as isize - self.clauses_by_var.len() as isize + 1;
         for _ in 0..to_add {
             let mut first = self.bitset_pool.acquire(|| Config::BitSet::create());
             let mut second = self.bitset_pool.acquire(|| Config::BitSet::create());
@@ -1272,7 +1272,8 @@ impl ConfigT for VsidsConfig {
     }
 
     const DEBUG: bool = false;
-    const CHECK_RESULTS: bool = false;
+    // const CHECK_RESULTS: bool = false;
+    const CHECK_RESULTS: bool = true;
 }
 
 impl ConfigT for VsidsConfigDebug {

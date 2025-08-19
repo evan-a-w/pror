@@ -243,8 +243,8 @@ pub fn stepped4_incr() {
         vec![2, -4, 1, 3, -5, -6],
     ];
     let mut solver = Default::new_from_vec(vec![]);
-    for clause in &formula {
-        solver.add_clause(clause.clone());
+    for clause in formula {
+        solver.add_clause(clause);
         println!("{:?}", solver.run());
     }
     println!("{:?}", solver.run());

@@ -148,8 +148,8 @@ Sat({1: false, 2: true, 3: true})
         let res = solver.run();
         writeln!(writer, "{:?}", res).unwrap();
         let expect = expect![[r#"
-Sat({1: false, 2: false, 3: true, 4: false, 5: false, 6: false})
-"#]];
+            Sat({1: false, 2: false, 3: false, 4: false, 5: false, 6: false})
+        "#]];
         expect.assert_eq(writer.borrow().as_ref());
     }
 
