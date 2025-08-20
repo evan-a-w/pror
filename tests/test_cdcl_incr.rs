@@ -13,7 +13,7 @@ mod tests {
     use pror::sat::SatResult;
 
     #[test]
-    fn stepped2_incr() {
+    fn stepped2_with_assumptions() {
         use std::fmt::Write;
         let formula = vec![
             vec![3, -5, 6],
@@ -114,10 +114,10 @@ Unsat
         let res3 = solver.run();
         writeln!(writer, "{:?}", res3).unwrap();
         let expect = expect![[r#"
-Sat({1: true, 2: true})
-Sat({1: false, 2: true, 3: true})
-Sat({1: false, 2: true, 3: true})
-"#]];
+            Sat({1: true, 2: true})
+            Sat({1: true, 2: false, 3: true})
+            Sat({1: false, 2: true, 3: true})
+        "#]];
         expect.assert_eq(writer.borrow().as_ref());
     }
 
@@ -141,14 +141,14 @@ Sat({1: false, 2: true, 3: true})
             vec![2, -4, 1, 3, -5, -6],
         ];
         let mut solver = Default::new_from_vec(vec![]);
-        for clause in &formula {
+        for clause in formula {
             solver.add_clause(clause.clone());
         }
         let mut writer = SharedStringWriter::new();
         let res = solver.run();
         writeln!(writer, "{:?}", res).unwrap();
         let expect = expect![[r#"
-            Sat({1: false, 2: false, 3: false, 4: false, 5: false, 6: false})
+            Sat({1: false, 2: false, 3: true, 4: false, 5: false, 6: false})
         "#]];
         expect.assert_eq(writer.borrow().as_ref());
     }

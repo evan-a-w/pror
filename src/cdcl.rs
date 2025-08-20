@@ -165,7 +165,11 @@ impl<Config: ConfigT> State<Config> {
         }
 
         self.all_variables.set(var);
-        let to_add = var as isize - self.clauses_by_var.len() as isize + 1;
+        if var < self.clauses_by_var.len() {
+            return;
+        }
+
+        let to_add = var - self.clauses_by_var.len() + 1;
         for _ in 0..to_add {
             let mut first = self.bitset_pool.acquire(|| Config::BitSet::create());
             let mut second = self.bitset_pool.acquire(|| Config::BitSet::create());
@@ -182,6 +186,16 @@ impl<Config: ConfigT> State<Config> {
                 second: BTreeMap::new(),
             });
         }
+
+        self.literal_by_score.insert((
+            OrderedFloat(self.score_for_literal[var][true]),
+            Literal::new(var, true),
+        ));
+        self.literal_by_score.insert((
+            OrderedFloat(self.score_for_literal[var][false]),
+            Literal::new(var, false),
+        ));
+
     }
 
     pub fn add_clause(&mut self, clause_vec: Vec<isize>) {
@@ -195,14 +209,16 @@ impl<Config: ConfigT> State<Config> {
                 panic!("Can't have 0 vars");
             }
             let var = lit.abs() as usize;
-            if variables.contains(var) && !negatives.contains(var) != (*lit < 0) {
+            let value = *lit >= 0;
+            if variables.contains(var) && negatives.contains(var) != value {
                 tautology = true;
             }
             variables.set(var);
-            if *lit < 0 {
+            if !value {
                 negatives.set(var);
             }
             self.maybe_add_var(var);
+            self.add_vsids_activity(Literal::new(var, value));
         }
         let clause = Clause {
             variables,
@@ -1282,7 +1298,7 @@ impl ConfigT for VsidsConfigDebug {
     fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
         choose_vsids_literal(state)
     }
-
+    
     const DEBUG: bool = true;
     const CHECK_RESULTS: bool = true;
 }
