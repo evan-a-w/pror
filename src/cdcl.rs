@@ -18,6 +18,7 @@ pub trait ConfigT: Sized {
     fn choose_literal(state: &mut State<Self>) -> Option<Literal>;
 
     const DEBUG: bool;
+    const CHECK_RESULTS: bool; // check the assignments actually match
 }
 
 #[macro_export]
@@ -91,20 +92,19 @@ pub struct State<Config: ConfigT> {
     vsids_inc: f64,
     vsids_decay_factor: f64,
     vsids_activity_rescale: f64,
-    score_for_literal: Vec<TfPair<f64>>,
     literal_by_score: BTreeSet<(OrderedFloat<f64>, Literal)>,
-    immediate_result: Option<SatResult>,
     simplify_clauses_every: usize,
     all_variables: Config::BitSet,
     assignments: Config::BitSet,
     clauses_first_tombstone: Option<usize>,
     clauses: Vec<TombStone<Clause<Config::BitSet>>>,
     clause_sorting_buckets: Vec<ClauseIdx>,
-    watched_clauses: Vec<TfPair<BTreeMap<ClauseIdx, Generation>>>,
     ready_for_unit_prop: Config::BitSet,
     trail: Vec<TrailEntry>,
     unassigned_variables: Config::BitSet,
     num_initial_clauses: usize,
+    watched_clauses: Vec<TfPair<BTreeMap<ClauseIdx, Generation>>>,
+    score_for_literal: Vec<TfPair<f64>>,
     clauses_by_var: Vec<TfPair<Config::BitSet>>,
     trail_entry_idx_by_var: Vec<Option<usize>>,
     decision_level: usize,
@@ -112,6 +112,7 @@ pub struct State<Config: ConfigT> {
     iterations: usize,
     rng: Pcg64,
     debug_writer: Option<RefCell<Box<dyn std::fmt::Write>>>,
+    instantly_unsat: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -156,6 +157,94 @@ impl<Config: ConfigT> State<Config> {
                 idx
             }
         }
+    }
+
+    fn maybe_add_var(&mut self, var: usize) {
+        if self.all_variables.contains(var) {
+            return;
+        }
+
+        self.all_variables.set(var);
+        if var < self.clauses_by_var.len() {
+            return;
+        }
+
+        let to_add = var - self.clauses_by_var.len() + 1;
+        for _ in 0..to_add {
+            let mut first = self.bitset_pool.acquire(|| Config::BitSet::create());
+            let mut second = self.bitset_pool.acquire(|| Config::BitSet::create());
+            first.clear_all();
+            second.clear_all();
+            self.clauses_by_var.push(TfPair { first, second });
+            self.trail_entry_idx_by_var.push(None);
+            self.score_for_literal.push(TfPair {
+                first: 0.0,
+                second: 0.0,
+            });
+            self.watched_clauses.push(TfPair {
+                first: BTreeMap::new(),
+                second: BTreeMap::new(),
+            });
+        }
+
+        self.literal_by_score.insert((
+            OrderedFloat(self.score_for_literal[var][true]),
+            Literal::new(var, true),
+        ));
+        self.literal_by_score.insert((
+            OrderedFloat(self.score_for_literal[var][false]),
+            Literal::new(var, false),
+        ));
+
+    }
+
+    pub fn add_clause(&mut self, clause_vec: Vec<isize>) {
+        let mut variables = self.bitset_pool.acquire(|| Config::BitSet::create());
+        let mut negatives = self.bitset_pool.acquire(|| Config::BitSet::create());
+        variables.clear_all();
+        negatives.clear_all();
+        let mut tautology = false;
+        for lit in &clause_vec {
+            if *lit == 0 {
+                panic!("Can't have 0 vars");
+            }
+            let var = lit.abs() as usize;
+            let value = *lit >= 0;
+            if variables.contains(var) && negatives.contains(var) != value {
+                tautology = true;
+            }
+            variables.set(var);
+            if !value {
+                negatives.set(var);
+            }
+            self.maybe_add_var(var);
+            self.add_vsids_activity(Literal::new(var, value));
+        }
+        let clause = Clause {
+            variables,
+            negatives,
+            tautology,
+            num_units: 0,
+            score: 0.0,
+            from_conflict: false,
+        };
+        let idx = self.push_clause(clause);
+
+        for lit in clause_vec {
+            let var = lit.abs() as usize;
+            let value = lit > 0;
+            self.clauses_by_var[var][value].set(idx);
+        }
+
+        Self::update_watch_literals_for_new_clause_helper(
+            &self.debug_writer,
+            &self.clauses[idx].value_exn(),
+            idx,
+            self.clauses[idx].generation().clone(),
+            &mut self.watched_clauses,
+            &mut self.ready_for_unit_prop,
+            &self.unassigned_variables,
+        );
     }
 
     fn delete_clause(&mut self, idx: usize) {
@@ -554,6 +643,7 @@ impl<Config: ConfigT> State<Config> {
         let mut learned = self.clauses[failed_clause_idx.0]
             .value_exn()
             .copy(&mut self.bitset_pool);
+        learned.from_conflict = true;
         let mut num_at_level = 0;
 
         for lit in learned.iter_literals() {
@@ -692,10 +782,7 @@ impl<Config: ConfigT> State<Config> {
             "reacting to action: {:?} at decision level {}", action, self.decision_level
         );
         match action {
-            Action::Unsat => {
-                self.immediate_result = Some(SatResult::Unsat);
-                StepResult::Done(SatResult::Unsat)
-            }
+            Action::Unsat => StepResult::Done(SatResult::Unsat),
             Action::FinishedUnitPropagation => StepResult::Continue,
             Action::Continue(literal) => {
                 let trail_entry = TrailEntry {
@@ -722,7 +809,7 @@ impl<Config: ConfigT> State<Config> {
     }
 
     fn make_decision(&mut self, literal_override: Option<Literal>) -> StepResult {
-        match Config::choose_literal(self) {
+        match literal_override.or_else(|| Config::choose_literal(self)) {
             None => {
                 let assignments = self.assignments();
                 let res = SatResult::Sat(assignments);
@@ -730,7 +817,6 @@ impl<Config: ConfigT> State<Config> {
             }
             Some(literal) => {
                 self.decision_level += 1;
-                let literal = literal_override.unwrap_or_else(|| literal);
                 self.react(Action::Continue(literal))
             }
         }
@@ -759,7 +845,7 @@ impl<Config: ConfigT> State<Config> {
             .enumerate()
             .skip(self.num_initial_clauses)
             .filter_map(|(i, x)| x.value().map(|x| (i, x)))
-            .filter(|(_, x)| x.num_units == 0 && self.can_trim_clause(x))
+            .filter(|(_, x)| x.from_conflict && x.num_units == 0 && self.can_trim_clause(x))
         {
             sorting_buckets.push(ClauseIdx(idx));
         }
@@ -807,8 +893,8 @@ impl<Config: ConfigT> State<Config> {
             self.simplify_clauses();
             self.decay_clause_activities();
         };
-        if let Some(res) = self.immediate_result.take() {
-            return StepResult::Done(res);
+        if self.instantly_unsat {
+            return StepResult::Done(SatResult::Unsat);
         }
         match self.unit_propagate() {
             UnitPropagationResult::NothingToPropagate => self.make_decision(literal_override),
@@ -819,17 +905,62 @@ impl<Config: ConfigT> State<Config> {
         }
     }
 
-    pub fn run(&mut self) -> SatResult {
+    fn run_inner(&mut self) -> SatResult {
         loop {
             match self.step(None) {
                 StepResult::Done(SatResult::Unsat) => return SatResult::Unsat,
                 StepResult::Done(SatResult::Sat(res)) => {
-                    assert!(satisfies(&self.clauses, &res));
+                    if Config::CHECK_RESULTS {
+                        assert!(satisfies(&self.clauses, &res));
+                    }
                     return SatResult::Sat(res);
                 }
                 StepResult::Continue => continue,
             }
         }
+    }
+
+    pub fn run(&mut self) -> SatResult {
+        self.restart();
+        self.run_inner()
+    }
+
+    fn stabilize_assumption(&mut self) -> Option<SatResult> {
+        match self.unit_propagate() {
+            UnitPropagationResult::Contradiction(ClauseIdx(idx)) => Some(SatResult::Unsat),
+            UnitPropagationResult::NothingToPropagate
+            | UnitPropagationResult::FinishedUnitPropagation => None,
+        }
+    }
+
+    pub fn run_with_assumptions(&mut self, assumptions: &[isize]) -> SatResult {
+        self.restart();
+
+        match self.stabilize_assumption() {
+            Some(res) => return res,
+            None => (),
+        }
+        for &lit_val in assumptions {
+            let var = lit_val.abs() as usize;
+            let value = lit_val > 0;
+            let lit = Literal::new(var, value);
+            if !self.unassigned_variables.contains(var) {
+                if self.assignments.contains(var) != value {
+                    return SatResult::Unsat;
+                } else {
+                    continue;
+                }
+            }
+            match self.make_decision(Some(lit)) {
+                StepResult::Continue => (),
+                StepResult::Done(res) => return res,
+            }
+            match self.stabilize_assumption() {
+                Some(res) => return res,
+                None => (),
+            }
+        }
+        self.run_inner()
     }
 
     fn update_watch_literals_for_new_clause_helper(
@@ -985,13 +1116,6 @@ impl<Config: ConfigT> State<Config> {
                 &variables_bitset,
             );
         }
-        let immediate_result = if instantly_unsat {
-            Some(SatResult::Unsat)
-        } else if clauses.is_empty() {
-            Some(SatResult::Sat(BTreeMap::new()))
-        } else {
-            None
-        };
 
         let num_initial_clauses = clauses.len();
         let all_variables = variables_bitset.clone();
@@ -1033,7 +1157,6 @@ impl<Config: ConfigT> State<Config> {
             clause_sorting_buckets: vec![],
             simplify_clauses_every: 2500,
             ready_for_unit_prop,
-            immediate_result,
             all_variables,
             assignments: Config::BitSet::create(),
             clauses,
@@ -1048,6 +1171,7 @@ impl<Config: ConfigT> State<Config> {
             iterations: 0,
             rng,
             debug_writer,
+            instantly_unsat,
         }
     }
 
@@ -1060,6 +1184,10 @@ impl<Config: ConfigT> State<Config> {
 
     pub fn new(formula: Formula<Config::BitSet>) -> Self {
         Self::new_with_debug_writer::<String>(formula, None)
+    }
+
+    pub fn create(formula: Vec<Vec<isize>>) -> Self {
+        Self::new_from_vec(formula)
     }
 
     pub fn new_from_vec(formula: Vec<Vec<isize>>) -> Self {
@@ -1075,12 +1203,25 @@ impl<Config: ConfigT> State<Config> {
         Self::new_with_pool_and_debug_writer(formula, bitset_pool, debug_writer)
     }
 
+    pub fn solve_with_debug_writer_and_assumptions<Writer: std::fmt::Write + 'static>(
+        formula: Vec<Vec<isize>>,
+        assumptions: &[isize],
+        debug_writer: Option<Writer>,
+    ) -> SatResult {
+        let mut state = Self::new_from_vec_with_debug_writer(formula, debug_writer);
+        state.run_with_assumptions(assumptions)
+    }
+
+    pub fn solve_with_assumptions(formula: Vec<Vec<isize>>, assumptions: &[isize]) -> SatResult {
+        Self::solve_with_debug_writer_and_assumptions::<String>(formula, assumptions, None)
+    }
+
     pub fn solve_with_debug_writer<Writer: std::fmt::Write + 'static>(
         formula: Vec<Vec<isize>>,
         debug_writer: Option<Writer>,
     ) -> SatResult {
         let mut state = Self::new_from_vec_with_debug_writer(formula, debug_writer);
-        state.run()
+        state.run_inner()
     }
 
     pub fn solve(formula: Vec<Vec<isize>>) -> SatResult {
@@ -1125,6 +1266,7 @@ impl ConfigT for RandomConfig {
     }
 
     const DEBUG: bool = false;
+    const CHECK_RESULTS: bool = false;
 }
 
 impl ConfigT for RandomConfigDebug {
@@ -1135,6 +1277,7 @@ impl ConfigT for RandomConfigDebug {
     }
 
     const DEBUG: bool = true;
+    const CHECK_RESULTS: bool = true;
 }
 
 impl ConfigT for VsidsConfig {
@@ -1145,6 +1288,8 @@ impl ConfigT for VsidsConfig {
     }
 
     const DEBUG: bool = false;
+    // const CHECK_RESULTS: bool = false;
+    const CHECK_RESULTS: bool = true;
 }
 
 impl ConfigT for VsidsConfigDebug {
@@ -1153,8 +1298,9 @@ impl ConfigT for VsidsConfigDebug {
     fn choose_literal(state: &mut State<Self>) -> Option<Literal> {
         choose_vsids_literal(state)
     }
-
+    
     const DEBUG: bool = true;
+    const CHECK_RESULTS: bool = true;
 }
 
 // pub type Default = State<RandomConfig>;
