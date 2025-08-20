@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 pub enum SatResult {
     Sat(BTreeMap<usize, bool>),
     Unsat,
+    // Unsat(Vec<Literal>), // unsat core
 }
 
 #[derive(Debug)]
@@ -120,6 +121,18 @@ impl<BitSet: BitSetT> Clause<BitSet> {
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Hash, PartialOrd, Ord)]
 pub struct Literal {
     value: isize,
+}
+
+impl std::convert::Into<isize> for Literal {
+    fn into(self) -> isize {
+        self.value
+    }
+}
+
+impl std::convert::From<isize> for Literal {
+    fn from(value: isize) -> Self {
+        Self { value }
+    }
 }
 
 impl Literal {
