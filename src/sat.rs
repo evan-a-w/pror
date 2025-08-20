@@ -7,8 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 #[derive(Debug)]
 pub enum SatResult {
     Sat(BTreeMap<usize, bool>),
-    Unsat,
-    // Unsat(Vec<Literal>), // unsat core
+    UnsatCore(Vec<crate::sat::Literal>),
 }
 
 #[derive(Debug)]

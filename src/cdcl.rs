@@ -113,6 +113,7 @@ pub struct State<Config: ConfigT> {
     rng: Pcg64,
     debug_writer: Option<RefCell<Box<dyn std::fmt::Write>>>,
     instantly_unsat: bool,
+    current_assumptions: Vec<Literal>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -782,7 +783,10 @@ impl<Config: ConfigT> State<Config> {
             "reacting to action: {:?} at decision level {}", action, self.decision_level
         );
         match action {
-            Action::Unsat => StepResult::Done(SatResult::Unsat),
+            Action::Unsat => {
+                let core = self.extract_unsat_core();
+                StepResult::Done(SatResult::UnsatCore(core))
+            }
             Action::FinishedUnitPropagation => StepResult::Continue,
             Action::Continue(literal) => {
                 let trail_entry = TrailEntry {
@@ -793,8 +797,11 @@ impl<Config: ConfigT> State<Config> {
                 self.add_to_trail(trail_entry);
                 StepResult::Continue
             }
-            Action::Contradiction(_) if self.decision_level == 0 => {
-                StepResult::Done(SatResult::Unsat)
+            Action::Contradiction(failed_clause_idx) if self.decision_level == 0 => 
+            {
+                let learned_clause = self.learn_clause_from_failure(ClauseIdx(failed_clause_idx));
+                let core = self.extract_unsat_core_of_learned(Some(&learned_clause));
+                StepResult::Done(SatResult::UnsatCore(core))
             }
             Action::Contradiction(failed_idx) => {
                 self.conflicts += 1;
@@ -894,7 +901,8 @@ impl<Config: ConfigT> State<Config> {
             self.decay_clause_activities();
         };
         if self.instantly_unsat {
-            return StepResult::Done(SatResult::Unsat);
+            // should do a real thing...
+            return StepResult::Done(SatResult::UnsatCore(vec![]));
         }
         match self.unit_propagate() {
             UnitPropagationResult::NothingToPropagate => self.make_decision(literal_override),
@@ -908,7 +916,7 @@ impl<Config: ConfigT> State<Config> {
     fn run_inner(&mut self) -> SatResult {
         loop {
             match self.step(None) {
-                StepResult::Done(SatResult::Unsat) => return SatResult::Unsat,
+                StepResult::Done(res@SatResult::UnsatCore(_)) => return res,
                 StepResult::Done(SatResult::Sat(res)) => {
                     if Config::CHECK_RESULTS {
                         assert!(satisfies(&self.clauses, &res));
@@ -927,7 +935,12 @@ impl<Config: ConfigT> State<Config> {
 
     fn stabilize_assumption(&mut self) -> Option<SatResult> {
         match self.unit_propagate() {
-            UnitPropagationResult::Contradiction(ClauseIdx(idx)) => Some(SatResult::Unsat),
+            UnitPropagationResult::Contradiction(failed_clause_idx) => 
+            {
+                let learned_clause = self.learn_clause_from_failure(failed_clause_idx);
+                let core = self.extract_unsat_core_of_learned(Some(&learned_clause));
+                Some(SatResult::UnsatCore(core))
+            }
             UnitPropagationResult::NothingToPropagate
             | UnitPropagationResult::FinishedUnitPropagation => None,
         }
@@ -935,6 +948,11 @@ impl<Config: ConfigT> State<Config> {
 
     pub fn run_with_assumptions(&mut self, assumptions: &[isize]) -> SatResult {
         self.restart();
+
+        self.current_assumptions.clear();
+        for &lit_val in assumptions {
+            self.current_assumptions.push(lit_val.into());
+        }
 
         match self.stabilize_assumption() {
             Some(res) => return res,
@@ -946,7 +964,8 @@ impl<Config: ConfigT> State<Config> {
             let lit = Literal::new(var, value);
             if !self.unassigned_variables.contains(var) {
                 if self.assignments.contains(var) != value {
-                    return SatResult::Unsat;
+                    let core = self.extract_unsat_core();
+                    return SatResult::UnsatCore(core);
                 } else {
                     continue;
                 }
@@ -961,6 +980,27 @@ impl<Config: ConfigT> State<Config> {
             }
         }
         self.run_inner()
+    }
+
+    fn extract_unsat_core_of_learned(&self, last_learned: Option<&Clause<Config::BitSet>>) -> Vec<Literal> {
+        let mut core = Vec::new();
+        if self.current_assumptions.is_empty() {
+            return core;
+        }
+        if let Some(clause) = last_learned {
+            let clause_literals: std::collections::HashSet<_> = clause.iter_literals().collect();
+            for &assumption in &self.current_assumptions {
+                if clause_literals.contains(&assumption.negate()) {
+                    core.push(assumption);
+                }
+            }
+        }
+        core
+    }
+
+    fn extract_unsat_core(&self) -> Vec<Literal> {
+        let last_learned = self.clauses.last().and_then(|c| c.value());
+        self.extract_unsat_core_of_learned(last_learned)
     }
 
     fn update_watch_literals_for_new_clause_helper(
@@ -1172,6 +1212,7 @@ impl<Config: ConfigT> State<Config> {
             rng,
             debug_writer,
             instantly_unsat,
+            current_assumptions: Vec::new(),
         }
     }
 

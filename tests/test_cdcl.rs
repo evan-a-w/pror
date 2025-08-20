@@ -26,7 +26,7 @@ mod tests {
         let formula = vec![vec![1], vec![-1]];
         let result = Default::solve(formula);
         let s = format!("{:?}", result);
-        let expect = expect!["Unsat"];
+        let expect = expect!["UnsatCore([])"];
         expect.assert_eq(&s);
     }
 
@@ -43,7 +43,7 @@ mod tests {
         let formula = vec![vec![]];
         let result = Default::solve(formula);
         let s = format!("{:?}", result);
-        let expect = expect!["Unsat"];
+        let expect = expect!["UnsatCore([])"];
         expect.assert_eq(&s);
     }
 
@@ -93,7 +93,7 @@ mod tests {
         let formula = vec![vec![1], vec![2], vec![-1, -2], vec![-3], vec![3]];
         let result = Default::solve(formula);
         let s = format!("{:?}", result);
-        let expect = expect!["Unsat"];
+        let expect = expect!["UnsatCore([])"];
         expect.assert_eq(&s);
     }
 
@@ -226,7 +226,7 @@ mod tests {
             updating watched clauses for literal 5
             reacting to action: Contradiction(7) at decision level 0
 
-            Done(Unsat)
+            Done(UnsatCore([]))
         "#]];
         expect.assert_eq(writer.borrow().as_ref());
     }
@@ -822,7 +822,7 @@ mod tests {
             updating watched clauses for literal 7
             found unit literal (1) while updating watched clauses for literal -7 in clause ("(1 -7)")
             reacting to action: Contradiction(45) at decision level 0
-            Unsat
+            UnsatCore([])
         "#]];
         expect.assert_eq(writer.borrow().as_ref());
     }
