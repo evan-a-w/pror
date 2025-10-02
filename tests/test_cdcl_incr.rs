@@ -3,6 +3,8 @@ use pror::dimacs;
 use pror::sat::*;
 use pror::shared_string_writer::SharedStringWriter;
 
+// CR-soon ewilliams: iirc unsat core is still incorrect
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -53,9 +55,9 @@ mod tests {
             Sat({1: false, 2: false, 3: true, 4: false, 5: false, 6: false})
             Sat({1: true, 2: false, 3: true, 4: false, 5: false, 6: false})
             Sat({1: true, 2: true, 3: true, 4: true, 5: false, 6: false})
-            Unsat
-            Sat({1: false, 2: false, 3: false, 4: true, 5: false, 6: true})
-            Unsat
+            UnsatCore([Literal { value: 1 }, Literal { value: 2 }, Literal { value: 5 }])
+            Sat({1: false, 2: false, 3: true, 4: false, 5: false, 6: true})
+            UnsatCore([Literal { value: 1 }, Literal { value: 2 }])
             Sat({1: false, 2: false, 3: false, 4: false, 5: false, 6: true})
             Sat({1: false, 2: false, 3: false, 4: false, 5: false, 6: false})
         "#]];
@@ -93,9 +95,9 @@ Sat({1: true})
         let res2 = solver.run();
         writeln!(writer, "{:?}", res2).unwrap();
         let expect = expect![[r#"
-Sat({1: true})
-Unsat
-"#]];
+            Sat({1: true})
+            UnsatCore([])
+        "#]];
         expect.assert_eq(writer.borrow().as_ref());
     }
 
