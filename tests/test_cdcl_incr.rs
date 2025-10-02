@@ -3,6 +3,8 @@ use pror::dimacs;
 use pror::sat::*;
 use pror::shared_string_writer::SharedStringWriter;
 
+// CR-soon ewilliams: iirc unsat core is still incorrect
+
 #[cfg(test)]
 mod tests {
     use super::*;
