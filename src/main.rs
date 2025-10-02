@@ -225,6 +225,7 @@ fn useless_set_thing() {
     });
 }
 
+// CR ewilliams: fails
 pub fn stepped4_incr() {
     let formula = vec![
         vec![3, -5, 6],
