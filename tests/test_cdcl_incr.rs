@@ -117,9 +117,30 @@ Sat({1: true})
         writeln!(writer, "{:?}", res3).unwrap();
         let expect = expect![[r#"
             Sat({1: true, 2: true})
-            Sat({1: true, 2: false, 3: true})
+            Sat({1: true, 2: true, 3: true})
             Sat({1: false, 2: true, 3: true})
         "#]];
+        expect.assert_eq(writer.borrow().as_ref());
+    }
+
+    #[test]
+    fn introduces_smaller_variable_after_larger_clause() {
+        use std::fmt::Write;
+        let mut solver = Default::new_from_vec(vec![]);
+        let mut writer = SharedStringWriter::new();
+
+        solver.add_clause(vec![7]);
+        let res1 = solver.run();
+        writeln!(writer, "{:?}", res1).unwrap();
+
+        solver.add_clause(vec![2]);
+        let res2 = solver.run();
+        writeln!(writer, "{:?}", res2).unwrap();
+
+        let expect = expect![[r#"
+Sat({7: true})
+Sat({2: true, 7: true})
+"#]];
         expect.assert_eq(writer.borrow().as_ref());
     }
 

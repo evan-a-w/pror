@@ -166,26 +166,26 @@ impl<Config: ConfigT> State<Config> {
         }
 
         self.all_variables.set(var);
-        if var < self.clauses_by_var.len() {
-            return;
-        }
-
-        let to_add = var - self.clauses_by_var.len() + 1;
-        for _ in 0..to_add {
-            let mut first = self.bitset_pool.acquire(|| Config::BitSet::create());
-            let mut second = self.bitset_pool.acquire(|| Config::BitSet::create());
-            first.clear_all();
-            second.clear_all();
-            self.clauses_by_var.push(TfPair { first, second });
-            self.trail_entry_idx_by_var.push(None);
-            self.score_for_literal.push(TfPair {
-                first: 0.0,
-                second: 0.0,
-            });
-            self.watched_clauses.push(TfPair {
-                first: BTreeMap::new(),
-                second: BTreeMap::new(),
-            });
+        self.unassigned_variables.set(var);
+        self.assignments.clear(var);
+        if var >= self.clauses_by_var.len() {
+            let to_add = var - self.clauses_by_var.len() + 1;
+            for _ in 0..to_add {
+                let mut first = self.bitset_pool.acquire(|| Config::BitSet::create());
+                let mut second = self.bitset_pool.acquire(|| Config::BitSet::create());
+                first.clear_all();
+                second.clear_all();
+                self.clauses_by_var.push(TfPair { first, second });
+                self.trail_entry_idx_by_var.push(None);
+                self.score_for_literal.push(TfPair {
+                    first: 0.0,
+                    second: 0.0,
+                });
+                self.watched_clauses.push(TfPair {
+                    first: BTreeMap::new(),
+                    second: BTreeMap::new(),
+                });
+            }
         }
 
         self.literal_by_score.insert((
